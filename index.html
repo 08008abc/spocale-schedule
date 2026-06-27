@@ -1,0 +1,477 @@
+<!doctype html>
+<html lang="ja">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>今日・明日のスポーツ予定</title>
+  <meta name="description" content="スポカレ対象URLから取得した今日・明日のスポーツ予定を見やすく表示するページ" />
+  <style>
+    :root {
+      --bg0:#031226;
+      --bg1:#06223f;
+      --panel:#07284a;
+      --panel2:#08375a;
+      --line:rgba(99,235,240,.45);
+      --text:#f6fbff;
+      --muted:#b8d2df;
+      --cyan:#59f0f1;
+      --blue:#1d7fd9;
+      --red:#ef3f46;
+      --green:#22c6a9;
+      --shadow:0 18px 50px rgba(0,0,0,.35);
+      --radius:22px;
+    }
+    * { box-sizing: border-box; }
+    html, body { margin:0; min-height:100%; }
+    body {
+      font-family: system-ui, -apple-system, BlinkMacSystemFont, "Hiragino Sans", "Yu Gothic", "Noto Sans JP", sans-serif;
+      color:var(--text);
+      background:
+        radial-gradient(circle at 90% -10%, rgba(52,242,235,.22), transparent 38%),
+        radial-gradient(circle at 10% 20%, rgba(42,105,255,.16), transparent 40%),
+        linear-gradient(145deg,var(--bg0),var(--bg1) 62%,#041324);
+      padding:18px;
+    }
+    .app {
+      width:min(1120px,100%);
+      margin:0 auto;
+    }
+    header {
+      padding:26px 10px 18px;
+      display:flex;
+      justify-content:space-between;
+      gap:16px;
+      align-items:flex-start;
+    }
+    .brand {
+      display:flex;
+      gap:16px;
+      align-items:center;
+    }
+    .logo {
+      width:56px;height:56px;border-radius:16px;
+      display:grid;place-items:center;
+      background:linear-gradient(145deg,rgba(89,240,241,.22),rgba(29,127,217,.18));
+      border:1px solid var(--line);
+      box-shadow:0 0 24px rgba(89,240,241,.18);
+      font-size:30px;
+    }
+    h1 {
+      margin:0;
+      font-size:clamp(28px,5vw,56px);
+      letter-spacing:.02em;
+      line-height:1;
+    }
+    .subtitle {
+      color:var(--cyan);
+      margin-top:8px;
+      font-weight:800;
+      letter-spacing:.15em;
+      font-size:clamp(14px,2.2vw,22px);
+    }
+    .meta {
+      text-align:right;
+      color:var(--muted);
+      font-size:14px;
+      line-height:1.8;
+      padding-top:4px;
+    }
+    .actions {
+      display:flex;
+      gap:10px;
+      justify-content:flex-end;
+      margin-top:8px;
+    }
+    button {
+      appearance:none;
+      border:1px solid var(--line);
+      background:rgba(8,55,90,.72);
+      color:var(--text);
+      padding:10px 14px;
+      border-radius:999px;
+      font-weight:800;
+      cursor:pointer;
+    }
+    button:hover { border-color:var(--cyan); }
+    .summary {
+      display:grid;
+      grid-template-columns:repeat(4, minmax(0,1fr));
+      gap:12px;
+      margin:0 0 18px;
+    }
+    .summary-card {
+      background:rgba(7,40,74,.72);
+      border:1px solid var(--line);
+      border-radius:18px;
+      padding:14px 16px;
+      box-shadow:var(--shadow);
+    }
+    .summary-card .num {
+      font-size:30px;
+      font-weight:900;
+      color:var(--cyan);
+    }
+    .summary-card .label { color:var(--muted); font-size:13px; }
+    .toolbar {
+      display:flex;
+      flex-wrap:wrap;
+      gap:10px;
+      margin:12px 0 20px;
+    }
+    .chip {
+      border:1px solid var(--line);
+      border-radius:999px;
+      padding:10px 16px;
+      background:rgba(3,18,38,.42);
+      color:var(--text);
+      font-weight:850;
+      cursor:pointer;
+      user-select:none;
+    }
+    .chip.active {
+      background:linear-gradient(145deg,rgba(89,240,241,.9),rgba(34,198,169,.72));
+      color:#032132;
+      border-color:transparent;
+    }
+    .day {
+      background:linear-gradient(135deg,rgba(8,55,90,.9),rgba(4,31,59,.82));
+      border:1px solid var(--line);
+      border-radius:var(--radius);
+      box-shadow:var(--shadow);
+      overflow:hidden;
+      margin-bottom:22px;
+    }
+    .day-header {
+      display:flex;
+      justify-content:space-between;
+      align-items:center;
+      gap:12px;
+      padding:18px 18px;
+      border-bottom:1px solid rgba(99,235,240,.25);
+      background:linear-gradient(90deg,rgba(89,240,241,.18),rgba(89,240,241,.03));
+    }
+    .day-title {
+      font-size:clamp(22px,3vw,34px);
+      font-weight:950;
+    }
+    .day-count {
+      color:var(--cyan);
+      font-weight:900;
+      white-space:nowrap;
+    }
+    .cards { padding:12px; display:grid; gap:12px; }
+    .card {
+      display:grid;
+      grid-template-columns:130px 1.15fr 1fr 1fr;
+      border:1px solid rgba(99,235,240,.35);
+      background:
+        radial-gradient(circle at 92% 5%,rgba(89,240,241,.14),transparent 38%),
+        linear-gradient(135deg,rgba(8,55,90,.78),rgba(3,18,38,.82));
+      border-radius:18px;
+      overflow:hidden;
+      min-height:136px;
+    }
+    .timebox {
+      display:flex;
+      flex-direction:column;
+      align-items:center;
+      justify-content:center;
+      gap:8px;
+      background:linear-gradient(155deg,rgba(89,240,241,.22),rgba(29,127,217,.16));
+      border-right:1px solid rgba(99,235,240,.35);
+      padding:14px 8px;
+    }
+    .time {
+      font-size:clamp(24px,3.4vw,42px);
+      font-weight:950;
+      line-height:1;
+    }
+    .icon { font-size:36px; filter:drop-shadow(0 8px 14px rgba(0,0,0,.25)); }
+    .block {
+      padding:14px 16px;
+      border-right:1px dashed rgba(99,235,240,.34);
+    }
+    .block:last-child { border-right:0; }
+    .label {
+      color:var(--cyan);
+      font-weight:900;
+      font-size:12px;
+      letter-spacing:.04em;
+      margin-bottom:4px;
+    }
+    .value {
+      color:var(--text);
+      font-weight:850;
+      line-height:1.45;
+      word-break:break-word;
+    }
+    .muted { color:var(--muted); font-weight:700; }
+    .badge {
+      display:inline-flex;
+      align-items:center;
+      justify-content:center;
+      min-width:54px;
+      border-radius:8px;
+      padding:4px 9px;
+      font-weight:950;
+      margin-right:8px;
+      font-size:14px;
+      color:white;
+    }
+    .badge.game { background:var(--red); }
+    .badge.event { background:var(--blue); }
+    .sport-line {
+      display:flex;
+      flex-wrap:wrap;
+      align-items:center;
+      gap:4px;
+      margin-bottom:8px;
+    }
+    .sport {
+      font-size:22px;
+      font-weight:950;
+    }
+    .row { display:flex; gap:9px; align-items:flex-start; margin-bottom:11px; }
+    .mini-icon { width:24px; text-align:center; color:var(--cyan); flex:0 0 24px; }
+    .empty {
+      padding:28px;
+      color:var(--muted);
+      text-align:center;
+      font-weight:800;
+    }
+    footer {
+      color:var(--muted);
+      text-align:center;
+      padding:20px 8px 40px;
+      font-size:13px;
+    }
+    a { color:var(--cyan); }
+    .legend {
+      display:flex;
+      flex-wrap:wrap;
+      gap:12px;
+      justify-content:center;
+      margin-top:10px;
+      color:var(--text);
+      font-weight:800;
+    }
+    .hidden { display:none !important; }
+    @media (max-width: 820px) {
+      body { padding:10px; }
+      header { flex-direction:column; }
+      .meta { text-align:left; }
+      .summary { grid-template-columns:repeat(2, minmax(0,1fr)); }
+      .card { grid-template-columns:92px 1fr; }
+      .block { border-right:0; border-bottom:1px dashed rgba(99,235,240,.22); }
+      .block:last-child { border-bottom:0; }
+      .timebox { border-right:1px solid rgba(99,235,240,.35); grid-row:span 3; }
+      .icon { font-size:30px; }
+      .time { font-size:28px; }
+      .sport { font-size:19px; }
+    }
+  </style>
+</head>
+<body>
+  <main class="app">
+    <header>
+      <div class="brand">
+        <div class="logo">📅</div>
+        <div>
+          <h1>今日・明日のスポーツ予定</h1>
+          <div class="subtitle">見やすい図形まとめ</div>
+        </div>
+      </div>
+      <div class="meta">
+        <div id="updated">更新日時：読み込み中…</div>
+        <div>表示範囲：今日・明日</div>
+        <div class="actions">
+          <button id="refreshBtn">再読み込み</button>
+        </div>
+      </div>
+    </header>
+
+    <section class="summary" aria-label="集計">
+      <div class="summary-card"><div class="num" id="totalCount">0</div><div class="label">予定数</div></div>
+      <div class="summary-card"><div class="num" id="gameCount">0</div><div class="label">試合</div></div>
+      <div class="summary-card"><div class="num" id="eventCount">0</div><div class="label">大会・イベント</div></div>
+      <div class="summary-card"><div class="num" id="streamCount">0</div><div class="label">配信あり</div></div>
+    </section>
+
+    <nav class="toolbar" aria-label="競技フィルター">
+      <div class="chip active" data-filter="all">すべて</div>
+      <div class="chip" data-filter="野球">野球</div>
+      <div class="chip" data-filter="サッカー">サッカー</div>
+      <div class="chip" data-filter="バレーボール">バレー</div>
+      <div class="chip" data-filter="ゴルフ">ゴルフ</div>
+      <div class="chip" data-filter="陸上競技">陸上</div>
+      <div class="chip" data-filter="バドミントン">バドミントン</div>
+    </nav>
+
+    <section id="content"></section>
+
+    <footer>
+      <div>データ元：スポカレ対象URL。公開時は <code>data/schedule.json</code> を毎日更新してください。</div>
+      <div class="legend">
+        <span><span class="badge game">試合</span>対戦あり</span>
+        <span><span class="badge event">大会</span>大会・イベント</span>
+        <span>📺 テレビ</span>
+        <span>▶ ネット配信</span>
+      </div>
+    </footer>
+  </main>
+
+  <script>
+    const DATA_URL = "data/schedule.json";
+    let allEvents = [];
+    let activeFilter = "all";
+
+    const sportIcon = {
+      "野球":"⚾", "サッカー":"⚽", "バレーボール":"🏐",
+      "ゴルフ":"⛳", "陸上競技":"🏃", "バドミントン":"🏸"
+    };
+
+    function toJstDateString(date = new Date(), addDays = 0) {
+      const fmt = new Intl.DateTimeFormat("en-CA", {
+        timeZone: "Asia/Tokyo", year: "numeric", month: "2-digit", day: "2-digit"
+      });
+      const nowParts = fmt.format(date).split("-");
+      const jstMidnight = new Date(`${nowParts[0]}-${nowParts[1]}-${nowParts[2]}T00:00:00+09:00`);
+      jstMidnight.setDate(jstMidnight.getDate() + addDays);
+      return fmt.format(jstMidnight);
+    }
+
+    function jpDateLabel(iso) {
+      const d = new Date(`${iso}T00:00:00+09:00`);
+      const wd = ["日","月","火","水","木","金","土"][d.getDay()];
+      return `${d.getFullYear()}年${d.getMonth()+1}月${d.getDate()}日（${wd}）`;
+    }
+
+    function typeClass(type) {
+      return type === "試合" ? "game" : "event";
+    }
+
+    function clean(value) {
+      return value && String(value).trim() ? String(value) : "記載なし";
+    }
+
+    function timeSortValue(t) {
+      if (t === "終日") return 9999;
+      const m = String(t).match(/^(\d{1,2}):(\d{2})/);
+      if (!m) return 9998;
+      return Number(m[1]) * 60 + Number(m[2]);
+    }
+
+    function eventCard(e) {
+      const icon = sportIcon[e.sport] || "🏟️";
+      return `
+        <article class="card" data-sport="${e.sport}">
+          <div class="timebox">
+            <div class="time">${clean(e.time)}</div>
+            <div class="icon" aria-hidden="true">${icon}</div>
+          </div>
+          <div class="block">
+            <div class="sport-line">
+              <span class="badge ${typeClass(e.type)}">${clean(e.type)}</span>
+              <span class="sport">${clean(e.sport)}</span>
+            </div>
+            <div class="label">大会・リーグ／イベント</div>
+            <div class="value">${clean(e.event)}</div>
+          </div>
+          <div class="block">
+            <div class="row">
+              <div class="mini-icon">👥</div>
+              <div>
+                <div class="label">対戦・対象</div>
+                <div class="value">${clean(e.target)}</div>
+              </div>
+            </div>
+            <div class="row">
+              <div class="mini-icon">📍</div>
+              <div>
+                <div class="label">会場</div>
+                <div class="value">${clean(e.venue)}</div>
+              </div>
+            </div>
+          </div>
+          <div class="block">
+            <div class="row">
+              <div class="mini-icon">📺</div>
+              <div>
+                <div class="label">テレビ</div>
+                <div class="value">${clean(e.tv)}</div>
+              </div>
+            </div>
+            <div class="row">
+              <div class="mini-icon">▶</div>
+              <div>
+                <div class="label">ネット配信</div>
+                <div class="value">${clean(e.stream)}</div>
+              </div>
+            </div>
+          </div>
+        </article>`;
+    }
+
+    function render() {
+      const today = toJstDateString(new Date(), 0);
+      const tomorrow = toJstDateString(new Date(), 1);
+
+      let events = allEvents
+        .filter(e => e.date === today || e.date === tomorrow)
+        .filter(e => activeFilter === "all" || e.sport === activeFilter)
+        .sort((a,b) => a.date.localeCompare(b.date) || timeSortValue(a.time) - timeSortValue(b.time));
+
+      document.getElementById("totalCount").textContent = events.length;
+      document.getElementById("gameCount").textContent = events.filter(e => e.type === "試合").length;
+      document.getElementById("eventCount").textContent = events.filter(e => e.type !== "試合").length;
+      document.getElementById("streamCount").textContent = events.filter(e => clean(e.stream) !== "記載なし").length;
+
+      const groups = [today, tomorrow].map(date => ({
+        date,
+        items: events.filter(e => e.date === date)
+      }));
+
+      const html = groups.map(g => `
+        <section class="day">
+          <div class="day-header">
+            <div class="day-title">📅 ${jpDateLabel(g.date)}</div>
+            <div class="day-count">${g.items.length}件</div>
+          </div>
+          <div class="cards">
+            ${g.items.length ? g.items.map(eventCard).join("") : `<div class="empty">この日の対象予定はありません。</div>`}
+          </div>
+        </section>
+      `).join("");
+
+      document.getElementById("content").innerHTML = html;
+    }
+
+    async function loadData() {
+      const res = await fetch(DATA_URL, { cache: "no-store" });
+      if (!res.ok) throw new Error("schedule.jsonを読み込めませんでした");
+      const data = await res.json();
+      allEvents = data.events || [];
+      const generated = data.generated_at ? new Date(data.generated_at) : null;
+      document.getElementById("updated").textContent =
+        "更新日時：" + (generated ? generated.toLocaleString("ja-JP", { timeZone: "Asia/Tokyo" }) : "不明");
+      render();
+    }
+
+    document.querySelectorAll(".chip").forEach(chip => {
+      chip.addEventListener("click", () => {
+        document.querySelectorAll(".chip").forEach(c => c.classList.remove("active"));
+        chip.classList.add("active");
+        activeFilter = chip.dataset.filter;
+        render();
+      });
+    });
+
+    document.getElementById("refreshBtn").addEventListener("click", loadData);
+
+    loadData().catch(err => {
+      document.getElementById("content").innerHTML =
+        `<section class="day"><div class="empty">${err.message}</div></section>`;
+    });
+  </script>
+</body>
+</html>

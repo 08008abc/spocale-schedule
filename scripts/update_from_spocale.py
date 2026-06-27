@@ -1,11 +1,13 @@
 #!/usr/bin/env python3
 """
-スポカレ対象URLから data/schedule.json を更新するための雛形です。
+スポカレ予定更新スクリプト。
+
+大事な安全装置:
+- 取得結果が0件だった場合、既存の data/schedule.json を空で上書きしません。
+  これにより、ページが突然0件表示になる事故を防ぎます。
 
 注意:
-- スポカレ側のHTML構造変更に弱いので、運用時は定期的に確認してください。
-- 競技ページ・リーグページは「個別試合ではなく大会・イベント名のみ」を出す想定です。
-- 放送・配信詳細は試合詳細ページ側にある場合があるため、必要に応じて詳細ページ取得を追加してください。
+- スポカレ側のHTML構造やアクセス制限により、取得ロジックは調整が必要になる場合があります。
 """
 
 from __future__ import annotations
@@ -68,7 +70,7 @@ SOURCE_URLS = [
 ]
 
 
-def today_and_tomorrow() -> set[str]:
+def target_dates() -> set[str]:
     now = datetime.now(JST)
     return {
         now.strftime("%Y-%m-%d"),
@@ -76,98 +78,122 @@ def today_and_tomorrow() -> set[str]:
     }
 
 
-def get_text(url: str) -> str:
+def load_existing() -> dict[str, Any]:
+    if OUT.exists():
+        try:
+            return json.loads(OUT.read_text(encoding="utf-8"))
+        except Exception:
+            pass
+    return {
+        "generated_at": datetime.now(JST).isoformat(),
+        "timezone": "Asia/Tokyo",
+        "source_name": "スポカレ",
+        "source_urls": SOURCE_URLS,
+        "events": [],
+    }
+
+
+def fetch(url: str) -> str:
     res = requests.get(
         url,
         timeout=20,
-        headers={"User-Agent": "Mozilla/5.0 schedule-page-updater/1.0"},
+        headers={
+            "User-Agent": "Mozilla/5.0 (compatible; spocale-schedule-bot/1.0)",
+            "Accept-Language": "ja,en-US;q=0.9,en;q=0.8",
+        },
     )
     res.raise_for_status()
     return res.text
+
+
+def page_name(soup: BeautifulSoup) -> str:
+    for tag in ["h1", "h2"]:
+        node = soup.find(tag)
+        if node:
+            text = node.get_text(" ", strip=True)
+            if text:
+                return text
+    title = soup.find("title")
+    if title:
+        return title.get_text(" ", strip=True).replace(" | スポカレ", "")
+    return "スポカレ予定"
 
 
 def is_team_page(url: str) -> bool:
     return "/team_and_players/" in url
 
 
-def parse_spocale_page(url: str, html: str, target_dates: set[str]) -> list[dict[str, Any]]:
-    """
-    汎用パーサーの雛形です。
-    スポカレのページには日付見出しと試合リンクが並ぶため、
-    まずテキストから該当日付付近を抽出する方針にしています。
+def norm_date(y: str, m: str, d: str) -> str:
+    return f"{y}-{m}-{d}"
 
-    本格運用では、詳細ページのリンクをたどってテレビ・ネット配信欄を取得してください。
-    """
+
+def cleanup(text: str) -> str:
+    return re.sub(r"\s+", " ", text).strip()
+
+
+def parse_page(url: str, html: str, dates: set[str]) -> list[dict[str, Any]]:
     soup = BeautifulSoup(html, "html.parser")
-    page_title = soup.find(["h1", "h2"])
-    page_name = page_title.get_text(" ", strip=True) if page_title else "スポカレ予定"
-
+    name = page_name(soup)
     text = soup.get_text("\n", strip=True)
-    events: list[dict[str, Any]] = []
 
-    # 例: 2026.06.28[日] のような日付見出しを yyyy-mm-dd に変換
     date_re = re.compile(r"(20\d{2})\.(\d{2})\.(\d{2})\[[^\]]+\]")
     matches = list(date_re.finditer(text))
+    results: list[dict[str, Any]] = []
 
     for i, m in enumerate(matches):
-        iso = f"{m.group(1)}-{m.group(2)}-{m.group(3)}"
-        if iso not in target_dates:
+        iso = norm_date(m.group(1), m.group(2), m.group(3))
+        if iso not in dates:
             continue
 
         start = m.end()
         end = matches[i + 1].start() if i + 1 < len(matches) else len(text)
         block = text[start:end]
 
-        # 個別チームページは試合単位、競技/リーグページは大会名単位で扱う
-        if is_team_page(url):
-            # 時刻を含む行をざっくり抽出
-            for line in block.splitlines():
-                if not re.search(r"\d{1,2}:\d{2}", line):
-                    continue
-                line = re.sub(r"\s+", " ", line).strip()
-                if len(line) < 6:
-                    continue
-                time_match = re.search(r"(\d{1,2}:\d{2})", line)
-                events.append({
-                    "date": iso,
-                    "time": time_match.group(1) if time_match else "記載なし",
-                    "type": "試合",
-                    "sport": "記載なし",
-                    "event": page_name,
-                    "target": line,
-                    "venue": "記載なし",
-                    "tv": "記載なし",
-                    "stream": "記載なし",
-                    "source": url,
-                })
-        else:
-            # 大会/イベント名として、時刻を含む行を1予定として扱う
-            for line in block.splitlines():
-                if not re.search(r"\d{1,2}:\d{2}|終日", line):
-                    continue
-                line = re.sub(r"\s+", " ", line).strip()
-                time_match = re.search(r"(\d{1,2}:\d{2}|終日)", line)
-                events.append({
-                    "date": iso,
-                    "time": time_match.group(1) if time_match else "記載なし",
-                    "type": "大会",
-                    "sport": page_name,
-                    "event": line,
-                    "target": "大会のみ",
-                    "venue": "記載なし",
-                    "tv": "記載なし",
-                    "stream": "記載なし",
-                    "source": url,
-                })
+        # スポカレの一覧はリンクテキストが1行にまとまることが多い
+        lines = [cleanup(x) for x in block.splitlines() if cleanup(x)]
+        candidate_lines = [x for x in lines if re.search(r"\d{1,2}:\d{2}|終日", x)]
 
-    return events
+        for line in candidate_lines:
+            time_match = re.search(r"(\d{1,2}:\d{2}|終日)", line)
+            time = time_match.group(1) if time_match else "記載なし"
+
+            if is_team_page(url):
+                item_type = "試合"
+                target = line
+                event_name = name
+            else:
+                item_type = "大会"
+                target = "大会のみ"
+                event_name = line
+
+            results.append({
+                "date": iso,
+                "time": time,
+                "type": item_type,
+                "sport": name,
+                "event": event_name,
+                "target": target,
+                "venue": "記載なし",
+                "tv": "記載なし",
+                "stream": "記載なし",
+                "source": url,
+            })
+
+    return results
 
 
 def dedupe(events: list[dict[str, Any]]) -> list[dict[str, Any]]:
     seen = set()
     out = []
     for e in events:
-        key = (e["date"], e["time"], e["sport"], e["event"], e["target"])
+        key = (
+            e.get("date"),
+            e.get("time"),
+            e.get("type"),
+            e.get("sport"),
+            e.get("event"),
+            e.get("target"),
+        )
         if key in seen:
             continue
         seen.add(key)
@@ -176,26 +202,39 @@ def dedupe(events: list[dict[str, Any]]) -> list[dict[str, Any]]:
 
 
 def main() -> None:
-    target_dates = today_and_tomorrow()
-    all_events: list[dict[str, Any]] = []
+    dates = target_dates()
+    events: list[dict[str, Any]] = []
+    errors: list[str] = []
 
     for url in SOURCE_URLS:
         try:
-            html = get_text(url)
-            all_events.extend(parse_spocale_page(url, html, target_dates))
+            events.extend(parse_page(url, fetch(url), dates))
         except Exception as exc:
-            print(f"warning: failed to fetch {url}: {exc}")
+            errors.append(f"{url}: {exc}")
+
+    events = dedupe(events)
+
+    existing = load_existing()
+
+    if not events:
+        # 0件で上書きしない。既存データを維持し、エラー情報だけ追記。
+        existing["generated_at"] = datetime.now(JST).isoformat()
+        existing["last_update_note"] = "新規取得が0件だったため、既存の予定データを維持しました。"
+        existing["last_update_errors"] = errors[:20]
+        OUT.write_text(json.dumps(existing, ensure_ascii=False, indent=2), encoding="utf-8")
+        print("No events fetched. Existing schedule preserved.")
+        return
 
     payload = {
         "generated_at": datetime.now(JST).isoformat(),
         "timezone": "Asia/Tokyo",
         "source_name": "スポカレ",
         "source_urls": SOURCE_URLS,
-        "events": dedupe(all_events),
+        "events": events,
+        "last_update_errors": errors[:20],
     }
-
-    OUT.parent.mkdir(parents=True, exist_ok=True)
     OUT.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
+    print(f"Updated {len(events)} events.")
 
 
 if __name__ == "__main__":

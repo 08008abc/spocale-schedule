@@ -1,5 +1,5 @@
 {
-  "generated_at": "2026-06-28T08:11:16.476389+09:00",
+  "generated_at": "2026-06-28T08:30:00+09:00",
   "timezone": "Asia/Tokyo",
   "source_name": "スポカレ",
   "source_urls": [
@@ -45,5 +45,126 @@
     "https://spocale.com/sports/2/team_and_players/22",
     "https://spocale.com/sports/5/team_and_players/121"
   ],
-  "events": []
+  "events": [
+    {
+      "date": "2026-06-28",
+      "time": "04:00",
+      "type": "大会",
+      "sport": "バドミントン",
+      "event": "BWFワールドツアー アメリカ・オープン 5日目",
+      "target": "大会のみ",
+      "venue": "アメリカ",
+      "tv": "記載なし",
+      "stream": "YouTubeLive",
+      "source": "スポカレ"
+    },
+    {
+      "date": "2026-06-28",
+      "time": "07:00",
+      "type": "大会",
+      "sport": "ゴルフ",
+      "event": "JLPGAツアー EARTH MONDAMIN CUP 第3日",
+      "target": "大会のみ",
+      "venue": "カメリアヒルズCC",
+      "tv": "ゴルフネットワーク、BS10",
+      "stream": "U-NEXT、ゴルフネットワークプラス",
+      "source": "スポカレ"
+    },
+    {
+      "date": "2026-06-28",
+      "time": "08:10",
+      "type": "試合",
+      "sport": "野球",
+      "event": "MLB",
+      "target": "ミルウォーキー・ブリュワーズ vs シカゴ・カブス",
+      "venue": "アメリカン・ファミリー・フィールド",
+      "tv": "記載なし",
+      "stream": "Amazon Prime Video、SPOTV NOW、MLB.TV",
+      "source": "スポカレ"
+    },
+    {
+      "date": "2026-06-28",
+      "time": "09:00",
+      "type": "大会",
+      "sport": "陸上競技",
+      "event": "2026函館マラソン",
+      "target": "大会のみ",
+      "venue": "千代台公園陸上競技場",
+      "tv": "NCV函館センター",
+      "stream": "公式アプリ配信",
+      "source": "スポカレ"
+    },
+    {
+      "date": "2026-06-28",
+      "time": "13:00",
+      "type": "試合",
+      "sport": "サッカー",
+      "event": "プレナスなでしこリーグ1部 第15節",
+      "target": "ASハリマアルビオン vs 静岡SSUボニータ",
+      "venue": "ウインク陸上競技場",
+      "tv": "記載なし",
+      "stream": "YouTube なでしこリーグチャンネル",
+      "source": "スポカレ"
+    },
+    {
+      "date": "2026-06-29",
+      "time": "00:00",
+      "type": "試合",
+      "sport": "バレーボール",
+      "event": "FIVBバレーボールネーションズリーグ 男子 Pool 4 Week 2",
+      "target": "フランス代表 vs バレーボール男子日本代表",
+      "venue": "フランス",
+      "tv": "BS-TBS",
+      "stream": "U-NEXT、VOLLEYBALL TV",
+      "source": "スポカレ"
+    },
+    {
+      "date": "2026-06-29",
+      "time": "00:00",
+      "type": "大会",
+      "sport": "陸上競技",
+      "event": "ダイヤモンドリーグ 第8戦 パリ大会",
+      "target": "大会のみ",
+      "venue": "フランス",
+      "tv": "記載なし",
+      "stream": "YouTubeLive",
+      "source": "スポカレ"
+    },
+    {
+      "date": "2026-06-29",
+      "time": "03:10",
+      "type": "試合",
+      "sport": "野球",
+      "event": "MLB",
+      "target": "ミルウォーキー・ブリュワーズ vs シカゴ・カブス",
+      "venue": "アメリカン・ファミリー・フィールド",
+      "tv": "記載なし",
+      "stream": "Lemino、SPOTV NOW、MLB.TV",
+      "source": "スポカレ"
+    },
+    {
+      "date": "2026-06-29",
+      "time": "04:00",
+      "type": "大会",
+      "sport": "バドミントン",
+      "event": "BWFワールドツアー アメリカ・オープン 最終日",
+      "target": "大会のみ",
+      "venue": "アメリカ",
+      "tv": "記載なし",
+      "stream": "記載なし",
+      "source": "スポカレ"
+    },
+    {
+      "date": "2026-06-29",
+      "time": "終日",
+      "type": "大会",
+      "sport": "ゴルフ",
+      "event": "JLPGAツアー EARTH MONDAMIN CUP 最終日",
+      "target": "大会のみ",
+      "venue": "カメリアヒルズCC",
+      "tv": "ゴルフネットワーク、BS10",
+      "stream": "U-NEXT、ゴルフネットワークプラス",
+      "source": "スポカレ"
+    }
+  ]
 }

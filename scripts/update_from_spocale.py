@@ -2,25 +2,30 @@
 # -*- coding: utf-8 -*-
 
 """
-スポカレ自動更新: 強制Jina Reader版
+スポカレ自動更新: Playwright版
 
-GitHub Actionsでスポカレの通常HTML取得をすると、
-タイトルだけ取れて日付・予定一覧が本文に入らないことがあるため、
-最初から必ず https://r.jina.ai/https://spocale.com/... 経由で取得します。
+requests / Jina Reader ではスポカレの予定一覧が取得できないため、
+GitHub Actions上でChromiumを起動し、JavaScript実行後のページ本文を読み取ります。
 
 出力:
   data/schedule.json
+
+必要:
+  pip install playwright beautifulsoup4
+  python -m playwright install --with-deps chromium
 """
 
+import asyncio
 import json
 import re
-import time
 from dataclasses import dataclass
 from datetime import datetime, timedelta
 from pathlib import Path
 from zoneinfo import ZoneInfo
 
-import requests
+from bs4 import BeautifulSoup
+from playwright.async_api import async_playwright
+
 
 ROOT = Path(__file__).resolve().parents[1]
 DATA_PATH = ROOT / "data" / "schedule.json"
@@ -70,11 +75,6 @@ SOURCE_URLS = [
     "https://spocale.com/sports/5/team_and_players/121",
 ]
 
-HEADERS = {
-    "User-Agent": "Mozilla/5.0 (compatible; spocale-schedule-bot/1.0)",
-    "Accept-Language": "ja,en-US;q=0.8,en;q=0.6",
-}
-
 SPORTS = [
     "バレーボール", "バスケットボール", "バドミントン", "フィギュアスケート",
     "サッカー", "ラグビー", "テニス", "ゴルフ", "陸上競技", "野球",
@@ -93,11 +93,6 @@ LEAGUES = [
 
 DATE_RE = re.compile(r"(20\d{2})\.(\d{2})\.(\d{2})\[[^\]]+\]")
 TIME_LINE_RE = re.compile(r"^(\d{1,2}:\d{2}|終日|未定)\s+")
-EVENT_START_RE = re.compile(
-    r"(?=(?:\d{1,2}:\d{2}|終日|未定)\s+(?:"
-    + "|".join(map(re.escape, SPORTS))
-    + r")\s+)"
-)
 
 
 @dataclass
@@ -141,10 +136,10 @@ def wanted_dates():
 
 
 def iso_from_date_text(text):
-    m = DATE_RE.search(text)
-    if not m:
+    match = DATE_RE.search(text)
+    if not match:
         return None
-    y, mo, d = m.groups()
+    y, mo, d = match.groups()
     return f"{y}-{mo}-{d}"
 
 
@@ -162,37 +157,14 @@ def find_league(text):
     return "記載なし"
 
 
-def jina_url(url):
-    return "https://r.jina.ai/http://r.jina.ai/http://example.com" if False else "https://r.jina.ai/http://r.jina.ai/"
-
-
-def fetch_jina_text(url):
-    # 正しい形式: https://r.jina.ai/http://example.com または https://r.jina.ai/http://...
-    # https URLの場合は https://r.jina.ai/http:// ではなく、下のようにそのまま付ける
-    reader_url = "https://r.jina.ai/http://r.jina.ai/http://example.com"
-    reader_url = "https://r.jina.ai/http://r.jina.ai/"  # ダミー上書き防止用ではなく直後で本値にする
-    reader_url = "https://r.jina.ai/http://r.jina.ai/http://example.com"
-    # 実際のReader URL
-    reader_url = "https://r.jina.ai/http://r.jina.ai/http://example.com"
-    # Jina Readerは /http://example.com 形式。httpsサイトは /http://r.jina.ai/http:// ではなく下記で動くことが多い。
-    # 最も一般的な形式:
-    reader_url = "https://r.jina.ai/http://r.jina.ai/http://example.com"
-    # ただしスポカレは通常URLをURLエンコードせず直結形式で使える:
-    reader_url = "https://r.jina.ai/" + url
-
-    r = requests.get(reader_url, headers=HEADERS, timeout=45)
-    r.raise_for_status()
-    r.encoding = r.apparent_encoding or "utf-8"
-    return r.text, reader_url
-
-
-def title_from_text(text):
-    m = re.search(r"Title:\s*(.+)", text)
-    if m:
-        return norm(m.group(1)).replace("の日程一覧 | スポカレ", "")
-    m = re.search(r"^#\s+(.+)$", text, re.MULTILINE)
-    if m:
-        return norm(m.group(1)).replace("の日程一覧 | スポカレ", "")
+def title_from_html(html):
+    soup = BeautifulSoup(html, "html.parser")
+    h2 = soup.find("h2")
+    if h2 and norm(h2.get_text(" ", strip=True)):
+        return norm(h2.get_text(" ", strip=True))
+    title = soup.find("title")
+    if title:
+        return norm(title.get_text(" ", strip=True)).replace("の日程一覧 | スポカレ", "")
     return "記載なし"
 
 
@@ -203,23 +175,26 @@ def clean_line(line):
     return norm(line)
 
 
-def rows_by_lines(text, wanted):
+def text_lines_from_html(html):
+    soup = BeautifulSoup(html, "html.parser")
+    for tag in soup(["script", "style", "noscript"]):
+        tag.decompose()
+    return [clean_line(x) for x in soup.get_text("\n", strip=True).splitlines() if clean_line(x)]
+
+
+def rows_from_lines(lines, wanted):
     rows = []
-    current = None
+    current_date = None
     seen = set()
 
-    for raw in text.splitlines():
-        line = clean_line(raw)
-        if not line:
+    for line in lines:
+        date = iso_from_date_text(line)
+        if date:
+            current_date = date
             continue
 
-        d = iso_from_date_text(line)
-        if d:
-            current = d
-            continue
-
-        if current in wanted and TIME_LINE_RE.match(line):
-            key = (current, line)
+        if current_date in wanted and TIME_LINE_RE.match(line):
+            key = (current_date, line)
             if key not in seen:
                 seen.add(key)
                 rows.append(key)
@@ -227,48 +202,14 @@ def rows_by_lines(text, wanted):
     return rows
 
 
-def rows_by_blocks(text, wanted):
-    compact = norm(text)
-    matches = list(DATE_RE.finditer(compact))
-    rows = []
-    seen = set()
-
-    for i, match in enumerate(matches):
-        date = iso_from_date_text(match.group(0))
-        if date not in wanted:
-            continue
-
-        start = match.end()
-        end = matches[i + 1].start() if i + 1 < len(matches) else len(compact)
-        block = compact[start:end]
-
-        starts = list(EVENT_START_RE.finditer(block))
-        for j, sm in enumerate(starts):
-            s = sm.start()
-            e = starts[j + 1].start() if j + 1 < len(starts) else len(block)
-            candidate = norm(block[s:e])
-
-            for stop in ["SEARCH", "MENU", "絞り込み", "この条件で絞り込む", "COPYRIGHT", "SHARE", "スポカレ"]:
-                if stop in candidate:
-                    candidate = norm(candidate.split(stop, 1)[0])
-
-            if candidate and TIME_LINE_RE.match(candidate):
-                key = (date, candidate)
-                if key not in seen:
-                    seen.add(key)
-                    rows.append(key)
-
-    return rows
-
-
 def split_line(line):
     line = clean_line(line)
-    m = TIME_LINE_RE.match(line)
-    if not m:
+    match = TIME_LINE_RE.match(line)
+    if not match:
         return "記載なし", "記載なし", line
 
-    time_text = m.group(1)
-    rest = norm(line[m.end():])
+    time_text = match.group(1)
+    rest = norm(line[match.end():])
 
     sport = find_sport(rest)
     if sport != "記載なし" and rest.startswith(sport):
@@ -288,8 +229,10 @@ def dedupe_tail(text):
     return norm(text) or "記載なし"
 
 
-def parse_team(date, line, url):
+def parse_team_event(date, line, url):
     time_text, sport, rest = split_line(line)
+
+    # 例: カブス VS 09:05 パドレス -> カブス vs パドレス
     rest = re.sub(r"\b(VS|Vs|vs)\s+\d{1,2}:\d{2}\b", "vs", rest)
     rest = norm(rest.replace(" VS ", " vs ").replace("VS", "vs").replace("Vs", "vs"))
 
@@ -302,7 +245,18 @@ def parse_team(date, line, url):
         target = norm(target)
         venue = dedupe_tail(venue)
 
-    return Event(date, time_text, "試合", sport, league, target or "記載なし", venue, "記載なし", "記載なし", url)
+    return Event(
+        date=date,
+        time=time_text,
+        type="試合",
+        sport=sport,
+        event=league,
+        target=target or "記載なし",
+        venue=venue or "記載なし",
+        tv="記載なし",
+        stream="記載なし",
+        source=url,
+    )
 
 
 def parse_page_event(date, line, url, title, page_sport):
@@ -310,53 +264,91 @@ def parse_page_event(date, line, url, title, page_sport):
     if sport == "記載なし":
         sport = page_sport
 
-    event = norm(rest)
-    if "|" in event:
-        event = norm(event.split("|", 1)[0])
+    event_name = norm(rest)
+    if "|" in event_name:
+        event_name = norm(event_name.split("|", 1)[0])
 
-    if title != "記載なし" and title not in event:
-        event = norm(f"{title} {event}")
+    if title != "記載なし" and title not in event_name:
+        event_name = norm(f"{title} {event_name}")
 
     venue = "記載なし"
     parts = rest.split()
     if len(parts) >= 2 and parts[-1] == parts[-2]:
         venue = parts[-1]
 
-    return Event(date, time_text, "大会", sport, event or title, "大会のみ", venue, "記載なし", "記載なし", url)
+    return Event(
+        date=date,
+        time=time_text,
+        type="大会",
+        sport=sport,
+        event=event_name or title,
+        target="大会のみ",
+        venue=venue,
+        tv="記載なし",
+        stream="記載なし",
+        source=url,
+    )
 
 
-def parse_url(url, wanted):
-    text, reader_url = fetch_jina_text(url)
-    title = title_from_text(text)
-    page_sport = find_sport(title + " " + text[:3000])
+def parse_html(url, html, wanted):
+    title = title_from_html(html)
+    lines = text_lines_from_html(html)
+    rows = rows_from_lines(lines, wanted)
+
+    page_sport = find_sport(title + " " + " ".join(lines[:80]))
     is_team_page = "/team_and_players/" in url
-
-    rows = rows_by_lines(text, wanted)
-    if not rows:
-        rows = rows_by_blocks(text, wanted)
 
     events = []
     for date, line in rows:
         try:
             if is_team_page:
-                events.append(parse_team(date, line, url))
+                events.append(parse_team_event(date, line, url))
             else:
                 events.append(parse_page_event(date, line, url, title, page_sport))
         except Exception:
             pass
 
-    debug = {
+    dates_in_page = []
+    for line in lines:
+        d = iso_from_date_text(line)
+        if d and d not in dates_in_page:
+            dates_in_page.append(d)
+
+    return events, {
         "url": url,
-        "reader_url": reader_url,
         "title": title,
-        "fetch_mode": "jina_forced",
-        "text_length": len(text),
+        "fetch_mode": "playwright",
         "rows": len(rows),
-        "dates_in_page": sorted(set(filter(None, [iso_from_date_text(m.group(0)) for m in DATE_RE.finditer(text)])))[:15],
+        "dates_in_page": dates_in_page[:20],
         "sample_rows": [row[1][:220] for row in rows[:5]],
-        "text_sample": text[:500],
+        "line_sample": lines[:40],
     }
-    return events, debug
+
+
+async def fetch_rendered_html(page, url):
+    await page.goto(url, wait_until="domcontentloaded", timeout=45000)
+
+    # JavaScriptで予定一覧が後から入る可能性があるので待つ
+    try:
+        await page.wait_for_load_state("networkidle", timeout=15000)
+    except Exception:
+        pass
+
+    # スクロールで遅延読込が走る可能性に対応
+    for _ in range(3):
+        await page.mouse.wheel(0, 2500)
+        await page.wait_for_timeout(1000)
+
+    # 日付テキストが出るか少し待つ
+    try:
+        await page.wait_for_function(
+            """() => /20\\d{2}\\.\\d{2}\\.\\d{2}\\[[^\\]]+\\]/.test(document.body.innerText)""",
+            timeout=8000,
+        )
+    except Exception:
+        pass
+
+    return await page.content()
 
 
 def dedupe(events):
@@ -366,8 +358,8 @@ def dedupe(events):
             by_key[event.key()] = event
 
     def sort_key(event):
-        m = re.match(r"^(\d{1,2}):(\d{2})", event.time)
-        minutes = int(m.group(1)) * 60 + int(m.group(2)) if m else 9999
+        match = re.match(r"^(\d{1,2}):(\d{2})", event.time)
+        minutes = int(match.group(1)) * 60 + int(match.group(2)) if match else 9999
         return (event.date, minutes, event.sport, event.event, event.target)
 
     return sorted(by_key.values(), key=sort_key)
@@ -387,7 +379,7 @@ def save(payload):
     DATA_PATH.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
 
 
-def main():
+async def run():
     wanted = wanted_dates()
     all_events = []
     errors = []
@@ -395,19 +387,35 @@ def main():
     fetched = 0
     parsed = 0
 
-    for url in SOURCE_URLS:
-        try:
-            events, debug = parse_url(url, wanted)
-            fetched += 1
-            debug_info.append(debug)
+    async with async_playwright() as p:
+        browser = await p.chromium.launch(headless=True)
+        context = await browser.new_context(
+            locale="ja-JP",
+            timezone_id="Asia/Tokyo",
+            user_agent=(
+                "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) "
+                "AppleWebKit/537.36 (KHTML, like Gecko) "
+                "Chrome/126.0.0.0 Safari/537.36"
+            ),
+        )
+        page = await context.new_page()
 
-            if events:
-                parsed += 1
-                all_events.extend(events)
+        for url in SOURCE_URLS:
+            try:
+                html = await fetch_rendered_html(page, url)
+                fetched += 1
 
-            time.sleep(0.6)
-        except Exception as exc:
-            errors.append(f"{url}: {type(exc).__name__}: {exc}")
+                events, debug = parse_html(url, html, wanted)
+                debug_info.append(debug)
+
+                if events:
+                    parsed += 1
+                    all_events.extend(events)
+
+            except Exception as exc:
+                errors.append(f"{url}: {type(exc).__name__}: {exc}")
+
+        await browser.close()
 
     events = dedupe(all_events)
     now = datetime.now(JST)
@@ -420,7 +428,7 @@ def main():
             "source_urls": SOURCE_URLS,
             "target_dates": sorted(wanted),
             "events": [event.as_dict() for event in events],
-            "last_update_note": f"Jina Reader経由で自動取得成功。取得成功ページ数: {fetched}, 予定検出ページ数: {parsed}, 予定数: {len(events)}",
+            "last_update_note": f"Playwrightで自動取得成功。取得成功ページ数: {fetched}, 予定検出ページ数: {parsed}, 予定数: {len(events)}",
             "last_update_errors": errors[:30],
             "debug_info": debug_info[:20],
         }
@@ -432,7 +440,7 @@ def main():
         payload["source_name"] = "スポカレ"
         payload["source_urls"] = SOURCE_URLS
         payload["target_dates"] = sorted(wanted)
-        payload["last_update_note"] = f"Jina Reader経由でも新規取得0件。取得成功ページ数: {fetched}, 予定検出ページ数: {parsed}, 予定数: 0"
+        payload["last_update_note"] = f"Playwrightでも新規取得0件。取得成功ページ数: {fetched}, 予定検出ページ数: {parsed}, 予定数: 0"
         payload["last_update_errors"] = errors[:30]
         payload["debug_info"] = debug_info[:20]
 
@@ -442,4 +450,4 @@ def main():
 
 
 if __name__ == "__main__":
-    raise SystemExit(main())
+    raise SystemExit(asyncio.run(run()))

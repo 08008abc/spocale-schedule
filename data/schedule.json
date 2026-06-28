@@ -1,5 +1,5 @@
 {
-  "generated_at": "2026-06-29T05:27:29+09:00",
+  "generated_at": "2026-06-29T05:44:29+09:00",
   "timezone": "Asia/Tokyo",
   "source_name": "スポカレ",
   "source_urls": [
@@ -51,5 +51,91 @@
   ],
   "events": [],
   "last_update_note": "新規取得0件のため既存データを維持。取得成功ページ数: 41, 予定検出ページ数: 0, 予定数: 0",
-  "last_update_errors": []
+  "last_update_errors": [],
+  "debug_info": [
+    {
+      "url": "https://spocale.com/sports/14/team_and_players/871",
+      "title": "ヴィクトリーナ姫路",
+      "rows": 0,
+      "dates_in_page": [],
+      "sample_rows": []
+    },
+    {
+      "url": "https://spocale.com/sports/2/team_and_players/1315",
+      "title": "INAC神戸レオネッサ",
+      "rows": 0,
+      "dates_in_page": [],
+      "sample_rows": []
+    },
+    {
+      "url": "https://spocale.com/sports/3/team_and_players/258",
+      "title": "コベルコ神戸スティーラーズ",
+      "rows": 0,
+      "dates_in_page": [],
+      "sample_rows": []
+    },
+    {
+      "url": "https://spocale.com/sports/2/team_and_players/53",
+      "title": "ツエーゲン金沢",
+      "rows": 0,
+      "dates_in_page": [],
+      "sample_rows": []
+    },
+    {
+      "url": "https://spocale.com/sports/2/team_and_players/2596",
+      "title": "ASハリマアルビオン",
+      "rows": 0,
+      "dates_in_page": [],
+      "sample_rows": []
+    },
+    {
+      "url": "https://spocale.com/sports/1/team_and_players/92",
+      "title": "シカゴ・カブス",
+      "rows": 0,
+      "dates_in_page": [],
+      "sample_rows": []
+    },
+    {
+      "url": "https://spocale.com/sports/1/team_and_players/3418",
+      "title": "報徳学園",
+      "rows": 0,
+      "dates_in_page": [],
+      "sample_rows": []
+    },
+    {
+      "url": "https://spocale.com/sports/1/team_and_players/7731",
+      "title": "神戸国際大付",
+      "rows": 0,
+      "dates_in_page": [],
+      "sample_rows": []
+    },
+    {
+      "url": "https://spocale.com/sports/1/team_and_players/7776",
+      "title": "東洋大姫路",
+      "rows": 0,
+      "dates_in_page": [],
+      "sample_rows": []
+    },
+    {
+      "url": "https://spocale.com/sports/1/team_and_players/2280",
+      "title": "星稜",
+      "rows": 0,
+      "dates_in_page": [],
+      "sample_rows": []
+    },
+    {
+      "url": "https://spocale.com/sports/1/team_and_players/2279",
+      "title": "日本航空石川",
+      "rows": 0,
+      "dates_in_page": [],
+      "sample_rows": []
+    },
+    {
+      "url": "https://spocale.com/sports/2/team_and_players/3815",
+      "title": "ヴィッセル神戸U-18",
+      "rows": 0,
+      "dates_in_page": [],
+      "sample_rows": []
+    }
+  ]
 }

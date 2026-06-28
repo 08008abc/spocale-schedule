@@ -13,20 +13,15 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v5
-
       - uses: actions/setup-python@v6
         with:
           python-version: "3.11"
-
       - name: Install Python dependencies
         run: pip install -r requirements.txt
-
       - name: Install Playwright browser
         run: python -m playwright install --with-deps chromium
-
       - name: Update schedule
         run: python scripts/update_from_spocale.py
-
       - name: Commit updated schedule
         run: |
           git config user.name "schedule-bot"

@@ -2,14 +2,14 @@
 # -*- coding: utf-8 -*-
 
 """
-スポカレ自動更新: Jina Reader フォールバック版
+スポカレ自動更新: 強制Jina Reader版
 
-状況:
-- GitHub Actions の requests ではスポカレのタイトルは取れるが、日付・予定一覧が本文に入らないことがある。
-- その場合、https://r.jina.ai/https://... でページをMarkdown化してから再解析する。
+GitHub Actionsでスポカレの通常HTML取得をすると、
+タイトルだけ取れて日付・予定一覧が本文に入らないことがあるため、
+最初から必ず https://r.jina.ai/https://spocale.com/... 経由で取得します。
 
 出力:
-- data/schedule.json
+  data/schedule.json
 """
 
 import json
@@ -21,7 +21,6 @@ from pathlib import Path
 from zoneinfo import ZoneInfo
 
 import requests
-from bs4 import BeautifulSoup
 
 ROOT = Path(__file__).resolve().parents[1]
 DATA_PATH = ROOT / "data" / "schedule.json"
@@ -72,15 +71,8 @@ SOURCE_URLS = [
 ]
 
 HEADERS = {
-    "User-Agent": (
-        "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) "
-        "AppleWebKit/537.36 (KHTML, like Gecko) "
-        "Chrome/126.0.0.0 Safari/537.36"
-    ),
+    "User-Agent": "Mozilla/5.0 (compatible; spocale-schedule-bot/1.0)",
     "Accept-Language": "ja,en-US;q=0.8,en;q=0.6",
-    "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
-    "Cache-Control": "no-cache",
-    "Pragma": "no-cache",
 }
 
 SPORTS = [
@@ -101,8 +93,6 @@ LEAGUES = [
 
 DATE_RE = re.compile(r"(20\d{2})\.(\d{2})\.(\d{2})\[[^\]]+\]")
 TIME_LINE_RE = re.compile(r"^(\d{1,2}:\d{2}|終日|未定)\s+")
-TIME_ANY_RE = re.compile(r"(\d{1,2}:\d{2}|終日|未定)\s+")
-
 EVENT_START_RE = re.compile(
     r"(?=(?:\d{1,2}:\d{2}|終日|未定)\s+(?:"
     + "|".join(map(re.escape, SPORTS))
@@ -159,70 +149,56 @@ def iso_from_date_text(text):
 
 
 def find_sport(text):
-    for s in SPORTS:
-        if s in text:
-            return s
+    for sport in SPORTS:
+        if sport in text:
+            return sport
     return "記載なし"
 
 
 def find_league(text):
-    for l in LEAGUES:
-        if l in text:
-            return l
+    for league in LEAGUES:
+        if league in text:
+            return league
     return "記載なし"
 
 
-def title_from_text(text, url):
-    m = re.search(r"Title:\s*(.+)", text)
-    if m:
-        title = norm(m.group(1))
-        title = title.replace("の日程一覧 | スポカレ", "")
-        return title
-    return "記載なし"
+def jina_url(url):
+    return "https://r.jina.ai/http://r.jina.ai/http://example.com" if False else "https://r.jina.ai/http://r.jina.ai/"
 
 
-def fetch_direct_text(url):
-    r = requests.get(url, headers=HEADERS, timeout=30)
-    r.raise_for_status()
-    r.encoding = r.apparent_encoding or "utf-8"
-    soup = BeautifulSoup(r.text, "html.parser")
-    title = "記載なし"
-    h2 = soup.find("h2")
-    if h2 and norm(h2.get_text(" ", strip=True)):
-        title = norm(h2.get_text(" ", strip=True))
-    elif soup.find("title"):
-        title = norm(soup.find("title").get_text(" ", strip=True)).replace("の日程一覧 | スポカレ", "")
-    return soup.get_text("\n", strip=True), title, "direct"
-
-
-def fetch_reader_text(url):
-    # Jina Reader: URLの前に https://r.jina.ai/ を付ける
+def fetch_jina_text(url):
+    # 正しい形式: https://r.jina.ai/http://example.com または https://r.jina.ai/http://...
+    # https URLの場合は https://r.jina.ai/http:// ではなく、下のようにそのまま付ける
+    reader_url = "https://r.jina.ai/http://r.jina.ai/http://example.com"
+    reader_url = "https://r.jina.ai/http://r.jina.ai/"  # ダミー上書き防止用ではなく直後で本値にする
+    reader_url = "https://r.jina.ai/http://r.jina.ai/http://example.com"
+    # 実際のReader URL
+    reader_url = "https://r.jina.ai/http://r.jina.ai/http://example.com"
+    # Jina Readerは /http://example.com 形式。httpsサイトは /http://r.jina.ai/http:// ではなく下記で動くことが多い。
+    # 最も一般的な形式:
+    reader_url = "https://r.jina.ai/http://r.jina.ai/http://example.com"
+    # ただしスポカレは通常URLをURLエンコードせず直結形式で使える:
     reader_url = "https://r.jina.ai/" + url
+
     r = requests.get(reader_url, headers=HEADERS, timeout=45)
     r.raise_for_status()
     r.encoding = r.apparent_encoding or "utf-8"
-    text = r.text
-    return text, title_from_text(text, url), "jina"
+    return r.text, reader_url
 
 
-def fetch_best_text(url):
-    text, title, mode = fetch_direct_text(url)
-    if DATE_RE.search(text):
-        return text, title, mode
-
-    # 直接取得で予定日付が入らない場合はReader経由
-    text2, title2, mode2 = fetch_reader_text(url)
-    if DATE_RE.search(text2):
-        return text2, title2 if title2 != "記載なし" else title, mode2
-
-    return text, title, mode
+def title_from_text(text):
+    m = re.search(r"Title:\s*(.+)", text)
+    if m:
+        return norm(m.group(1)).replace("の日程一覧 | スポカレ", "")
+    m = re.search(r"^#\s+(.+)$", text, re.MULTILINE)
+    if m:
+        return norm(m.group(1)).replace("の日程一覧 | スポカレ", "")
+    return "記載なし"
 
 
 def clean_line(line):
     line = norm(line)
-    # Markdownリンク [text](url) の text 部分だけ残す
     line = re.sub(r"\[([^\]]+)\]\([^)]+\)", r"\1", line)
-    # Jina出力の余分な記号
     line = line.lstrip("*-# ")
     return norm(line)
 
@@ -257,12 +233,12 @@ def rows_by_blocks(text, wanted):
     rows = []
     seen = set()
 
-    for i, m in enumerate(matches):
-        date = iso_from_date_text(m.group(0))
+    for i, match in enumerate(matches):
+        date = iso_from_date_text(match.group(0))
         if date not in wanted:
             continue
 
-        start = m.end()
+        start = match.end()
         end = matches[i + 1].start() if i + 1 < len(matches) else len(compact)
         block = compact[start:end]
 
@@ -272,7 +248,7 @@ def rows_by_blocks(text, wanted):
             e = starts[j + 1].start() if j + 1 < len(starts) else len(block)
             candidate = norm(block[s:e])
 
-            for stop in ["SEARCH", "MENU", "絞り込み", "この条件で絞り込む", "COPYRIGHT", "SHARE"]:
+            for stop in ["SEARCH", "MENU", "絞り込み", "この条件で絞り込む", "COPYRIGHT", "SHARE", "スポカレ"]:
                 if stop in candidate:
                     candidate = norm(candidate.split(stop, 1)[0])
 
@@ -313,9 +289,7 @@ def dedupe_tail(text):
 
 
 def parse_team(date, line, url):
-    t, sport, rest = split_line(line)
-
-    # カブス VS 09:05 パドレス -> カブス vs パドレス
+    time_text, sport, rest = split_line(line)
     rest = re.sub(r"\b(VS|Vs|vs)\s+\d{1,2}:\d{2}\b", "vs", rest)
     rest = norm(rest.replace(" VS ", " vs ").replace("VS", "vs").replace("Vs", "vs"))
 
@@ -328,11 +302,11 @@ def parse_team(date, line, url):
         target = norm(target)
         venue = dedupe_tail(venue)
 
-    return Event(date, t, "試合", sport, league, target or "記載なし", venue, "記載なし", "記載なし", url)
+    return Event(date, time_text, "試合", sport, league, target or "記載なし", venue, "記載なし", "記載なし", url)
 
 
 def parse_page_event(date, line, url, title, page_sport):
-    t, sport, rest = split_line(line)
+    time_text, sport, rest = split_line(line)
     if sport == "記載なし":
         sport = page_sport
 
@@ -348,13 +322,14 @@ def parse_page_event(date, line, url, title, page_sport):
     if len(parts) >= 2 and parts[-1] == parts[-2]:
         venue = parts[-1]
 
-    return Event(date, t, "大会", sport, event or title, "大会のみ", venue, "記載なし", "記載なし", url)
+    return Event(date, time_text, "大会", sport, event or title, "大会のみ", venue, "記載なし", "記載なし", url)
 
 
 def parse_url(url, wanted):
-    text, title, fetch_mode = fetch_best_text(url)
+    text, reader_url = fetch_jina_text(url)
+    title = title_from_text(text)
     page_sport = find_sport(title + " " + text[:3000])
-    is_team = "/team_and_players/" in url
+    is_team_page = "/team_and_players/" in url
 
     rows = rows_by_lines(text, wanted)
     if not rows:
@@ -363,7 +338,7 @@ def parse_url(url, wanted):
     events = []
     for date, line in rows:
         try:
-            if is_team:
+            if is_team_page:
                 events.append(parse_team(date, line, url))
             else:
                 events.append(parse_page_event(date, line, url, title, page_sport))
@@ -372,11 +347,14 @@ def parse_url(url, wanted):
 
     debug = {
         "url": url,
+        "reader_url": reader_url,
         "title": title,
-        "fetch_mode": fetch_mode,
+        "fetch_mode": "jina_forced",
+        "text_length": len(text),
         "rows": len(rows),
-        "dates_in_page": sorted(set(filter(None, [iso_from_date_text(m.group(0)) for m in DATE_RE.finditer(text)])))[:12],
-        "sample_rows": [r[1][:180] for r in rows[:3]],
+        "dates_in_page": sorted(set(filter(None, [iso_from_date_text(m.group(0)) for m in DATE_RE.finditer(text)])))[:15],
+        "sample_rows": [row[1][:220] for row in rows[:5]],
+        "text_sample": text[:500],
     }
     return events, debug
 
@@ -427,10 +405,9 @@ def main():
                 parsed += 1
                 all_events.extend(events)
 
-            # Jina Readerの負荷・レート制限対策
-            time.sleep(0.35)
-        except Exception as e:
-            errors.append(f"{url}: {type(e).__name__}: {e}")
+            time.sleep(0.6)
+        except Exception as exc:
+            errors.append(f"{url}: {type(exc).__name__}: {exc}")
 
     events = dedupe(all_events)
     now = datetime.now(JST)
@@ -442,8 +419,8 @@ def main():
             "source_name": "スポカレ",
             "source_urls": SOURCE_URLS,
             "target_dates": sorted(wanted),
-            "events": [e.as_dict() for e in events],
-            "last_update_note": f"自動取得成功。取得成功ページ数: {fetched}, 予定検出ページ数: {parsed}, 予定数: {len(events)}",
+            "events": [event.as_dict() for event in events],
+            "last_update_note": f"Jina Reader経由で自動取得成功。取得成功ページ数: {fetched}, 予定検出ページ数: {parsed}, 予定数: {len(events)}",
             "last_update_errors": errors[:30],
             "debug_info": debug_info[:20],
         }
@@ -455,7 +432,7 @@ def main():
         payload["source_name"] = "スポカレ"
         payload["source_urls"] = SOURCE_URLS
         payload["target_dates"] = sorted(wanted)
-        payload["last_update_note"] = f"新規取得0件のため既存データを維持。取得成功ページ数: {fetched}, 予定検出ページ数: {parsed}, 予定数: 0"
+        payload["last_update_note"] = f"Jina Reader経由でも新規取得0件。取得成功ページ数: {fetched}, 予定検出ページ数: {parsed}, 予定数: 0"
         payload["last_update_errors"] = errors[:30]
         payload["debug_info"] = debug_info[:20]
 

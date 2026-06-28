@@ -1,5 +1,5 @@
 {
-  "generated_at": "2026-06-29T05:44:29+09:00",
+  "generated_at": "2026-06-29T06:03:11+09:00",
   "timezone": "Asia/Tokyo",
   "source_name": "スポカレ",
   "source_urls": [
@@ -56,6 +56,7 @@
     {
       "url": "https://spocale.com/sports/14/team_and_players/871",
       "title": "ヴィクトリーナ姫路",
+      "fetch_mode": "direct",
       "rows": 0,
       "dates_in_page": [],
       "sample_rows": []
@@ -63,6 +64,7 @@
     {
       "url": "https://spocale.com/sports/2/team_and_players/1315",
       "title": "INAC神戸レオネッサ",
+      "fetch_mode": "direct",
       "rows": 0,
       "dates_in_page": [],
       "sample_rows": []
@@ -70,6 +72,7 @@
     {
       "url": "https://spocale.com/sports/3/team_and_players/258",
       "title": "コベルコ神戸スティーラーズ",
+      "fetch_mode": "direct",
       "rows": 0,
       "dates_in_page": [],
       "sample_rows": []
@@ -77,6 +80,7 @@
     {
       "url": "https://spocale.com/sports/2/team_and_players/53",
       "title": "ツエーゲン金沢",
+      "fetch_mode": "direct",
       "rows": 0,
       "dates_in_page": [],
       "sample_rows": []
@@ -84,6 +88,7 @@
     {
       "url": "https://spocale.com/sports/2/team_and_players/2596",
       "title": "ASハリマアルビオン",
+      "fetch_mode": "direct",
       "rows": 0,
       "dates_in_page": [],
       "sample_rows": []
@@ -91,6 +96,7 @@
     {
       "url": "https://spocale.com/sports/1/team_and_players/92",
       "title": "シカゴ・カブス",
+      "fetch_mode": "direct",
       "rows": 0,
       "dates_in_page": [],
       "sample_rows": []
@@ -98,6 +104,7 @@
     {
       "url": "https://spocale.com/sports/1/team_and_players/3418",
       "title": "報徳学園",
+      "fetch_mode": "direct",
       "rows": 0,
       "dates_in_page": [],
       "sample_rows": []
@@ -105,6 +112,7 @@
     {
       "url": "https://spocale.com/sports/1/team_and_players/7731",
       "title": "神戸国際大付",
+      "fetch_mode": "direct",
       "rows": 0,
       "dates_in_page": [],
       "sample_rows": []
@@ -112,6 +120,7 @@
     {
       "url": "https://spocale.com/sports/1/team_and_players/7776",
       "title": "東洋大姫路",
+      "fetch_mode": "direct",
       "rows": 0,
       "dates_in_page": [],
       "sample_rows": []
@@ -119,6 +128,7 @@
     {
       "url": "https://spocale.com/sports/1/team_and_players/2280",
       "title": "星稜",
+      "fetch_mode": "direct",
       "rows": 0,
       "dates_in_page": [],
       "sample_rows": []
@@ -126,6 +136,7 @@
     {
       "url": "https://spocale.com/sports/1/team_and_players/2279",
       "title": "日本航空石川",
+      "fetch_mode": "direct",
       "rows": 0,
       "dates_in_page": [],
       "sample_rows": []
@@ -133,6 +144,71 @@
     {
       "url": "https://spocale.com/sports/2/team_and_players/3815",
       "title": "ヴィッセル神戸U-18",
+      "fetch_mode": "direct",
+      "rows": 0,
+      "dates_in_page": [],
+      "sample_rows": []
+    },
+    {
+      "url": "https://spocale.com/sports/14/team_and_players/4829",
+      "title": "バレーボール男子日本代表",
+      "fetch_mode": "direct",
+      "rows": 0,
+      "dates_in_page": [],
+      "sample_rows": []
+    },
+    {
+      "url": "https://spocale.com/sports/14/team_and_players/3588",
+      "title": "バレーボール女子日本代表",
+      "fetch_mode": "direct",
+      "rows": 0,
+      "dates_in_page": [],
+      "sample_rows": []
+    },
+    {
+      "url": "https://spocale.com/sports/2/team_and_players/269",
+      "title": "サッカー日本代表(SAMURAI BLUE)",
+      "fetch_mode": "direct",
+      "rows": 0,
+      "dates_in_page": [],
+      "sample_rows": []
+    },
+    {
+      "url": "https://spocale.com/sports/2/team_and_players/437",
+      "title": "イタリア代表",
+      "fetch_mode": "direct",
+      "rows": 0,
+      "dates_in_page": [],
+      "sample_rows": []
+    },
+    {
+      "url": "https://spocale.com/sports/2/team_and_players/2615",
+      "title": "日本(なでしこJAPAN)",
+      "fetch_mode": "direct",
+      "rows": 0,
+      "dates_in_page": [],
+      "sample_rows": []
+    },
+    {
+      "url": "https://spocale.com/sports/5/team_and_players/519",
+      "title": "バスケットボール日本代表",
+      "fetch_mode": "direct",
+      "rows": 0,
+      "dates_in_page": [],
+      "sample_rows": []
+    },
+    {
+      "url": "https://spocale.com/sports/5/team_and_players/3013",
+      "title": "バスケットボール女子日本代表",
+      "fetch_mode": "direct",
+      "rows": 0,
+      "dates_in_page": [],
+      "sample_rows": []
+    },
+    {
+      "url": "https://spocale.com/sports/3/team_and_players/3684",
+      "title": "ラグビー日本代表",
+      "fetch_mode": "direct",
       "rows": 0,
       "dates_in_page": [],
       "sample_rows": []

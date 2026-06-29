@@ -1,5 +1,5 @@
 {
-  "generated_at": "2026-06-30T06:11:04.660624+09:00",
+  "generated_at": "2026-06-30T07:43:23+09:00",
   "timezone": "Asia/Tokyo",
   "source_name": "スポカレ",
   "source_urls": [
@@ -132,6 +132,10 @@
       "source": "https://spocale.com/sports/18/leagues/556"
     }
   ],
-  "last_update_note": "新規取得が0件だったため、既存データを維持しました。ページ側は日本時間の当日＋翌日だけを表示します。",
-  "last_update_errors": []
+  "last_update_note": "2026-06-30 と 2026-07-01 の予定取得が0件だったため、既存の events は維持しました。target_dates は更新済みです。",
+  "last_update_errors": [],
+  "target_dates": [
+    "2026-06-30",
+    "2026-07-01"
+  ]
 }

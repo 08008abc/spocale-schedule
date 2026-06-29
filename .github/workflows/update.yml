@@ -1,8 +1,10 @@
-name: Update sports schedule
+name: Update Spocale Schedule
 
 on:
   schedule:
-    - cron: "5 15 * * *"
+    # 日本時間 0:00 に実行します。
+    # GitHub Actions の cron は UTC なので、日本時間0:00 = UTC前日15:00 です。
+    - cron: "0 15 * * *"
   workflow_dispatch:
 
 permissions:
@@ -12,20 +14,24 @@ jobs:
   update:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v5
-      - uses: actions/setup-python@v6
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
         with:
           python-version: "3.11"
-      - name: Install Python dependencies
+
+      - name: Install dependencies
         run: pip install -r requirements.txt
-      - name: Install Playwright browser
-        run: python -m playwright install --with-deps chromium
+
       - name: Update schedule
         run: python scripts/update_from_spocale.py
-      - name: Commit updated schedule
+
+      - name: Commit and push if changed
         run: |
           git config user.name "schedule-bot"
           git config user.email "schedule-bot@example.com"
           git add data/schedule.json
-          git diff --cached --quiet || git commit -m "Update sports schedule"
+          git diff --cached --quiet || git commit -m "Update daily schedule"
           git push

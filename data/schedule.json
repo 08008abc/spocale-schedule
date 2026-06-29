@@ -1,5 +1,5 @@
 {
-  "generated_at": "2026-06-29T08:56:39.448595+09:00",
+  "generated_at": "2026-06-29T09:13:54.948651+09:00",
   "timezone": "Asia/Tokyo",
   "source_name": "スポカレ",
   "source_urls": [
@@ -132,6 +132,6 @@
       "source": "https://spocale.com/sports/18/leagues/556"
     }
   ],
-  "last_update_note": "初期データ。GitHub Actions実行後は日本時間の当日＋翌日に自動更新されます。",
+  "last_update_note": "新規取得が0件だったため、既存データを維持しました。ページ側は日本時間の当日＋翌日だけを表示します。",
   "last_update_errors": []
 }

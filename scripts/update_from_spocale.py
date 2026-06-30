@@ -1,21 +1,27 @@
 #!/usr/bin/env python3
 """
-スポカレ予定更新スクリプト
+スポカレ 今日＋明日 自動更新 完成版
 
 目的:
-- 毎日0時に GitHub Actions で実行
-- data/schedule.json の target_dates を必ず「日本時間の今日＋明日」に更新
-- 予定が取得できた場合は events も更新
-- 予定が0件だった場合は、events を空で上書きせず、既存の events を維持
+- GitHub Actionsで毎日0時過ぎ（日本時間）に実行
+- data/schedule.json を必ず「日本時間の今日＋明日」に更新
+- 対象URLから該当日の予定だけを取得して events に反映
+- team_and_players は個別試合として扱う
+- sports / leagues は大会・イベントとして扱う
+- 取得できないURLや解析失敗は last_update_errors に記録
+- 古い events を別日付として表示し続けない
 """
 
 from __future__ import annotations
 
 import json
 import re
+import time
+from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any
+from urllib.parse import urljoin
 
 import requests
 from bs4 import BeautifulSoup
@@ -68,228 +74,336 @@ SOURCE_URLS = [
     "https://spocale.com/sports/5/team_and_players/121",
 ]
 
+SPORT_BY_ID = {
+    "1": "野球",
+    "2": "サッカー",
+    "3": "ラグビー",
+    "5": "バスケットボール",
+    "6": "ゴルフ",
+    "7": "陸上競技",
+    "8": "テニス",
+    "9": "競馬",
+    "11": "モータースポーツ",
+    "14": "バレーボール",
+    "18": "バドミントン",
+    "22": "競艇",
+    "32": "卓球",
+    "43": "アメリカンフットボール",
+    "44": "フィギュアスケート",
+    "50": "スケートボード",
+    "51": "BMX",
+    "52": "スポーツクライミング",
+}
+
+LEAGUE_WORDS = [
+    "MLB",
+    "B.PREMIER",
+    "Bリーグ",
+    "WEリーグ",
+    "なでしこリーグ",
+    "Jリーグ",
+    "プレミアリーグ",
+    "FIFA",
+    "ワールドカップ",
+    "ネーションズリーグ",
+    "Vリーグ",
+    "SVリーグ",
+    "リーグワン",
+    "BWFワールドツアー",
+    "JLPGAツアー",
+    "ダイヤモンドリーグ",
+]
+
+
+@dataclass
+class PageContext:
+    url: str
+    name: str
+    sport: str
+    page_type: str  # team or event
+
 
 def now_jst() -> datetime:
     return datetime.now(JST)
 
 
-def current_target_dates() -> list[str]:
+def target_dates() -> list[str]:
     today = now_jst().date()
-    tomorrow = today + timedelta(days=1)
-    return [today.isoformat(), tomorrow.isoformat()]
+    return [today.isoformat(), (today + timedelta(days=1)).isoformat()]
 
 
-def load_existing() -> dict[str, Any]:
-    if OUT.exists():
-        try:
-            return json.loads(OUT.read_text(encoding="utf-8"))
-        except Exception:
-            pass
-
-    return {
-        "generated_at": now_jst().isoformat(timespec="seconds"),
-        "timezone": "Asia/Tokyo",
-        "source_name": "スポカレ",
-        "source_urls": SOURCE_URLS,
-        "target_dates": current_target_dates(),
-        "events": [],
-        "last_update_note": "初期データです。",
-        "last_update_errors": [],
-    }
-
-
-def save_payload(payload: dict[str, Any]) -> None:
-    OUT.parent.mkdir(parents=True, exist_ok=True)
-    OUT.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
-
-
-def fetch(url: str) -> str:
-    response = requests.get(
-        url,
-        timeout=25,
-        headers={
-            "User-Agent": "Mozilla/5.0 (compatible; spocale-daily-schedule/1.0)",
-            "Accept-Language": "ja,en-US;q=0.9,en;q=0.8",
-        },
-    )
-    response.raise_for_status()
-    return response.text
-
-
-def cleanup(text: str) -> str:
+def clean(text: str | None) -> str:
     return re.sub(r"\s+", " ", text or "").strip()
-
-
-def page_name(soup: BeautifulSoup) -> str:
-    for tag in ("h1", "h2"):
-        node = soup.find(tag)
-        if node:
-            text = cleanup(node.get_text(" ", strip=True))
-            if text:
-                return text.replace(" | スポカレ", "")
-
-    title = soup.find("title")
-    if title:
-        return cleanup(title.get_text(" ", strip=True)).replace(" | スポカレ", "")
-
-    return "スポカレ予定"
 
 
 def is_team_page(url: str) -> bool:
     return "/team_and_players/" in url
 
 
-def normalize_sport(name: str, url: str) -> str:
-    mapping = {
-        "/sports/1": "野球",
-        "/sports/2": "サッカー",
-        "/sports/3": "ラグビー",
-        "/sports/5": "バスケットボール",
-        "/sports/6": "ゴルフ",
-        "/sports/7": "陸上競技",
-        "/sports/8": "テニス",
-        "/sports/9": "競馬",
-        "/sports/14": "バレーボール",
-        "/sports/18": "バドミントン",
-        "/sports/22": "競艇",
-        "/sports/32": "卓球",
-        "/sports/43": "アメリカンフットボール",
-        "/sports/44": "フィギュアスケート",
-        "/sports/50": "スケートボード",
-        "/sports/51": "BMX",
-        "/sports/52": "スポーツクライミング",
-    }
-
-    for key, value in mapping.items():
-        if key in url:
-            return value
-
-    text = cleanup(name)
-    if "野球" in text or "MLB" in text or "カブス" in text:
-        return "野球"
-    if "サッカー" in text or "日本代表" in text or "INAC" in text:
-        return "サッカー"
-    if "バレー" in text or "ヴィクトリーナ" in text:
-        return "バレーボール"
-    if "ラグビー" in text or "スティーラーズ" in text:
-        return "ラグビー"
-    if "バスケット" in text:
-        return "バスケットボール"
-    if "ゴルフ" in text:
-        return "ゴルフ"
-    if "陸上" in text or "マラソン" in text:
-        return "陸上競技"
-    if "バドミントン" in text:
-        return "バドミントン"
-
-    return text.replace("の日程一覧", "")
-
-
-def guess_tv(line: str) -> str:
-    words = [
-        "NHK", "BS", "BS10", "BS-TBS", "地上波", "フジテレビ", "日本テレビ",
-        "TBS", "テレビ朝日", "テレビ東京", "WOWOW", "J SPORTS", "ゴルフネットワーク"
-    ]
-    found = [w for w in words if w in line]
-    return "、".join(dict.fromkeys(found)) if found else "記載なし"
-
-
-def guess_stream(line: str) -> str:
-    words = [
-        "YouTubeLive", "YouTube", "U-NEXT", "DAZN", "ABEMA", "ABEMA de DAZN",
-        "Lemino", "SPOTV NOW", "MLB.TV", "Amazon Prime Video",
-        "VOLLEYBALL TV", "J SPORTSオンデマンド"
-    ]
-    found = [w for w in words if w in line]
-    return "、".join(dict.fromkeys(found)) if found else "記載なし"
-
-
-def guess_venue(line: str) -> str:
-    for pattern in [r"会場[:：]\s*([^|／]+)", r"開催地[:：]\s*([^|／]+)", r"@([^|／]+)"]:
-        m = re.search(pattern, line)
-        if m:
-            return cleanup(m.group(1))
+def sport_from_url(url: str) -> str:
+    m = re.search(r"/sports/(\d+)", url)
+    if m:
+        return SPORT_BY_ID.get(m.group(1), "記載なし")
     return "記載なし"
 
 
-def split_target_from_line(line: str, time: str) -> str:
-    text = cleanup(line)
-    if time != "記載なし":
-        text = cleanup(text.replace(time, " ", 1))
-    text = re.sub(r"^[-–—\s]+", "", text)
-    return text or "記載なし"
+def fetch(url: str) -> str:
+    last_error: Exception | None = None
+    for i in range(3):
+        try:
+            res = requests.get(
+                url,
+                timeout=25,
+                headers={
+                    "User-Agent": "Mozilla/5.0 (compatible; spocale-daily-page/2.0; +https://github.com/)",
+                    "Accept-Language": "ja,en-US;q=0.9,en;q=0.8",
+                    "Cache-Control": "no-cache",
+                },
+            )
+            res.raise_for_status()
+            return res.text
+        except Exception as exc:
+            last_error = exc
+            time.sleep(1 + i)
+    raise RuntimeError(str(last_error))
 
 
-def parse_page(url: str, html: str, dates: set[str]) -> list[dict[str, Any]]:
-    soup = BeautifulSoup(html, "html.parser")
-    name = page_name(soup)
-    sport = normalize_sport(name, url)
-    text = soup.get_text("\n", strip=True)
+def page_name(soup: BeautifulSoup) -> str:
+    for selector in ["h1", "h2", "title"]:
+        node = soup.select_one(selector)
+        if node:
+            txt = clean(node.get_text(" ", strip=True)).replace(" | スポカレ", "")
+            if txt and txt not in {"スポカレ スポーツ日程更新中"}:
+                return txt
+    return "スポカレ予定"
 
-    # スポカレでよくある日付表記: 2026.07.01[水]
-    date_re = re.compile(r"(20\d{2})\.(\d{2})\.(\d{2})\[[^\]]+\]")
-    matches = list(date_re.finditer(text))
-    results: list[dict[str, Any]] = []
 
-    for i, match in enumerate(matches):
-        iso = f"{match.group(1)}-{match.group(2)}-{match.group(3)}"
-        if iso not in dates:
+def page_context(url: str, soup: BeautifulSoup) -> PageContext:
+    return PageContext(
+        url=url,
+        name=page_name(soup),
+        sport=sport_from_url(url),
+        page_type="team" if is_team_page(url) else "event",
+    )
+
+
+def iso_from_spocale_date(text: str) -> str | None:
+    m = re.search(r"(20\d{2})\.(\d{2})\.(\d{2})", text)
+    if not m:
+        return None
+    return f"{m.group(1)}-{m.group(2)}-{m.group(3)}"
+
+
+def extract_schedule_lines(soup: BeautifulSoup) -> list[tuple[str, str, str]]:
+    """
+    return [(date_iso, entry_text, href), ...]
+
+    スポカレの一覧は「日付見出し → /sports/.../game/... のリンク」という構造が多い。
+    BeautifulSoupのDOM順にテキストを見ながら、直前の日付をゲームリンクへ紐付ける。
+    """
+    records: list[tuple[str, str, str]] = []
+    current_date: str | None = None
+
+    # DOM順に、日付らしいテキストとゲームリンクを拾う
+    for node in soup.find_all(["h2", "h3", "h4", "div", "p", "li", "a", "span"]):
+        text = clean(node.get_text(" ", strip=True))
+        if not text:
             continue
 
-        start = match.end()
-        end = matches[i + 1].start() if i + 1 < len(matches) else len(text)
-        block = text[start:end]
-        lines = [cleanup(x) for x in block.splitlines() if cleanup(x)]
+        date = iso_from_spocale_date(text)
+        if date:
+            current_date = date
 
-        candidates = [line for line in lines if re.search(r"\d{1,2}:\d{2}|終日|未定", line)]
+        if node.name == "a":
+            href = node.get("href") or ""
+            full_href = urljoin("https://spocale.com", href)
+            is_game_link = "/game/" in href or re.search(r"/sports/\d+/game/\d+", href)
+            has_time = bool(re.search(r"(\d{1,2}:\d{2}|未定|終日)", text))
+            if current_date and is_game_link and has_time:
+                records.append((current_date, text, full_href))
 
-        if not candidates and lines:
-            joined = " ".join(lines[:10])
-            if re.search(r"\d{1,2}:\d{2}|終日|未定", joined):
-                candidates = [joined]
+    # フォールバック: DOMから取れなかった場合、ページ全文の行を順番に見る
+    if not records:
+        current_date = None
+        for line in soup.get_text("\n", strip=True).splitlines():
+            line = clean(line)
+            if not line:
+                continue
+            date = iso_from_spocale_date(line)
+            if date:
+                current_date = date
+                continue
+            if current_date and re.search(r"(\d{1,2}:\d{2}|未定|終日)", line):
+                # メニュー等を避けるため、競技名っぽい語がある行だけ
+                if any(s in line for s in SPORT_BY_ID.values()) or "VS" in line or "オープン" in line or "大会" in line:
+                    records.append((current_date, line, ""))
 
-        for line in candidates:
-            tm = re.search(r"(\d{1,2}:\d{2}|終日|未定)", line)
-            time = tm.group(1) if tm else "記載なし"
+    return records
 
-            if is_team_page(url):
-                item_type = "試合"
-                event_name = name
-                target = split_target_from_line(line, time)
-            else:
-                item_type = "大会"
-                event_name = split_target_from_line(line, time)
-                target = "大会のみ"
 
-            results.append({
-                "date": iso,
-                "time": time,
-                "type": item_type,
-                "sport": sport,
-                "event": cleanup(event_name),
-                "target": cleanup(target),
-                "venue": guess_venue(line),
-                "tv": guess_tv(line),
-                "stream": guess_stream(line),
-                "source": url,
-            })
+def normalize_time(entry: str) -> str:
+    m = re.search(r"(\d{1,2}:\d{2}|未定|終日)", entry)
+    if not m:
+        return "記載なし"
+    t = m.group(1)
+    if re.match(r"^\d{1,2}:\d{2}$", t):
+        h, mm = t.split(":")
+        return f"{int(h):02d}:{mm}"
+    return t
 
-    return results
+
+def remove_first_time_and_sport(entry: str, sport: str) -> str:
+    text = clean(entry)
+    text = re.sub(r"^(\d{1,2}:\d{2}|未定|終日)\s*", "", text)
+    if sport != "記載なし":
+        text = re.sub(rf"^{re.escape(sport)}\s*", "", text)
+    return clean(text)
+
+
+def detect_league(text: str, fallback: str) -> str:
+    for word in LEAGUE_WORDS:
+        if word in text:
+            return word
+    if fallback and fallback != "スポカレ予定":
+        return fallback
+    return "記載なし"
+
+
+def strip_duplicate_venue(venue: str) -> str:
+    venue = clean(venue)
+    if venue == "記載なし":
+        return venue
+    tokens = venue.split()
+    half = len(tokens) // 2
+    if half > 0 and len(tokens) % 2 == 0 and tokens[:half] == tokens[half:]:
+        return " ".join(tokens[:half])
+    # よくある「カナダ カナダ」「リグレー・フィールド リグレー・フィールド」を圧縮
+    parts = venue.split(" ")
+    if len(parts) >= 2 and parts[-1] == parts[-2]:
+        return parts[-1]
+    return venue
+
+
+def guess_stream(text: str) -> str:
+    words = [
+        "YouTubeLive", "YouTube", "U-NEXT", "DAZN", "ABEMA de DAZN", "ABEMA",
+        "Lemino", "SPOTV NOW", "MLB.TV", "Amazon Prime Video",
+        "VOLLEYBALL TV", "J SPORTSオンデマンド", "ゴルフネットワークプラス"
+    ]
+    found = [w for w in words if w in text]
+    return "、".join(dict.fromkeys(found)) if found else "記載なし"
+
+
+def guess_tv(text: str) -> str:
+    words = [
+        "NHK BS4K", "NHK BS", "NHK", "BS-TBS", "BS10", "BS", "フジテレビ",
+        "日本テレビ", "TBS", "テレビ朝日", "テレビ東京", "WOWOW",
+        "J SPORTS", "ゴルフネットワーク"
+    ]
+    found = [w for w in words if w in text]
+    return "、".join(dict.fromkeys(found)) if found else "記載なし"
+
+
+def parse_team_entry(ctx: PageContext, date: str, entry: str, href: str) -> dict[str, Any]:
+    time_value = normalize_time(entry)
+    rest = remove_first_time_and_sport(entry, ctx.sport)
+
+    # 「カブス VS 09:05 パドレス」を「カブス vs パドレス」にする
+    rest = re.sub(r"\s+VS\s+(\d{1,2}:\d{2}|未定|終日)\s+", " vs ", rest)
+    rest = rest.replace(" VS ", " vs ")
+
+    league = detect_league(rest, "記載なし")
+    before_league = rest
+    after_league = ""
+    if league != "記載なし" and league in rest:
+        before_league, after_league = rest.split(league, 1)
+
+    target = clean(before_league) or ctx.name
+    venue = strip_duplicate_venue(after_league) if after_league else "記載なし"
+
+    return {
+        "date": date,
+        "time": time_value,
+        "type": "試合",
+        "sport": ctx.sport,
+        "event": league,
+        "target": target,
+        "venue": venue or "記載なし",
+        "tv": guess_tv(entry),
+        "stream": guess_stream(entry),
+        "source": href or ctx.url,
+    }
+
+
+def parse_event_entry(ctx: PageContext, date: str, entry: str, href: str) -> dict[str, Any]:
+    time_value = normalize_time(entry)
+    rest = remove_first_time_and_sport(entry, ctx.sport)
+
+    # 例: カナダ・オープン 2日目 BWFワールドツアー | カナダ・オープン 2日目 カナダ カナダ
+    if "|" in rest:
+        left, right = [clean(x) for x in rest.split("|", 1)]
+    else:
+        left, right = rest, ""
+
+    event_name = left or ctx.name
+    league = detect_league(event_name, ctx.name)
+    venue = "記載なし"
+
+    if right:
+        # rightからイベント名の重複を取り除き、最後に残る会場らしい部分を使う
+        right2 = right
+        for token in [event_name, league, ctx.name]:
+            if token and token != "記載なし":
+                right2 = right2.replace(token, " ")
+        venue = strip_duplicate_venue(right2)
+
+    return {
+        "date": date,
+        "time": time_value,
+        "type": "大会",
+        "sport": ctx.sport,
+        "event": event_name,
+        "target": "大会のみ",
+        "venue": venue or "記載なし",
+        "tv": guess_tv(entry),
+        "stream": guess_stream(entry),
+        "source": href or ctx.url,
+    }
+
+
+def parse_url(url: str, dates: set[str]) -> list[dict[str, Any]]:
+    html = fetch(url)
+    soup = BeautifulSoup(html, "html.parser")
+    ctx = page_context(url, soup)
+
+    events: list[dict[str, Any]] = []
+    for date, entry, href in extract_schedule_lines(soup):
+        if date not in dates:
+            continue
+        if ctx.page_type == "team":
+            events.append(parse_team_entry(ctx, date, entry, href))
+        else:
+            events.append(parse_event_entry(ctx, date, entry, href))
+
+    return events
+
+
+def event_sort_key(e: dict[str, Any]) -> tuple[str, int, str, str]:
+    t = e.get("time", "")
+    if re.match(r"^\d{2}:\d{2}$", t):
+        h, m = t.split(":")
+        minutes = int(h) * 60 + int(m)
+    elif t == "終日":
+        minutes = 9997
+    elif t == "未定":
+        minutes = 9998
+    else:
+        minutes = 9999
+    return (e.get("date", ""), minutes, e.get("sport", ""), e.get("target", ""))
 
 
 def dedupe(events: list[dict[str, Any]]) -> list[dict[str, Any]]:
-    seen = set()
-    unique: list[dict[str, Any]] = []
-
-    def time_key(t: str) -> str:
-        if re.match(r"^\d{1,2}:\d{2}$", t or ""):
-            h, m = t.split(":")
-            return f"{int(h):02d}:{m}"
-        if t == "終日":
-            return "99:98"
-        if t == "未定":
-            return "99:99"
-        return "99:97"
+    merged: dict[tuple[str, str, str, str, str], dict[str, Any]] = {}
 
     for e in events:
         key = (
@@ -297,56 +411,57 @@ def dedupe(events: list[dict[str, Any]]) -> list[dict[str, Any]]:
             e.get("time", ""),
             e.get("type", ""),
             e.get("sport", ""),
-            e.get("event", ""),
             e.get("target", ""),
         )
-        if key in seen:
+        if key not in merged:
+            merged[key] = e
             continue
-        seen.add(key)
-        unique.append(e)
 
-    return sorted(unique, key=lambda x: (x.get("date", ""), time_key(x.get("time", "")), x.get("sport", "")))
+        # 既存より詳しい情報があれば補完
+        base = merged[key]
+        for field in ["event", "venue", "tv", "stream", "source"]:
+            if base.get(field) in {"", "記載なし", None} and e.get(field) not in {"", "記載なし", None}:
+                base[field] = e[field]
+
+    return sorted(merged.values(), key=event_sort_key)
+
+
+def write_schedule(events: list[dict[str, Any]], target: list[str], errors: list[str]) -> None:
+    payload = {
+        "generated_at": now_jst().isoformat(timespec="seconds"),
+        "timezone": "Asia/Tokyo",
+        "source_name": "スポカレ",
+        "source_urls": SOURCE_URLS,
+        "display_rule": "毎日0時に日本時間の実行日当日と翌日の2日分へ更新",
+        "target_dates": target,
+        "events": events,
+        "last_update_note": (
+            f"{target[0]} と {target[1]} の予定を {len(events)} 件取得しました。"
+            if events else
+            f"{target[0]} と {target[1]} の対象予定は0件、または取得できませんでした。"
+        ),
+        "last_update_errors": errors[:80],
+    }
+    OUT.parent.mkdir(parents=True, exist_ok=True)
+    OUT.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
 
 
 def main() -> None:
-    target_dates = current_target_dates()
-    target_set = set(target_dates)
+    target = target_dates()
+    date_set = set(target)
 
-    existing = load_existing()
-    existing["generated_at"] = now_jst().isoformat(timespec="seconds")
-    existing["timezone"] = "Asia/Tokyo"
-    existing["source_name"] = "スポカレ"
-    existing["source_urls"] = SOURCE_URLS
-    existing["target_dates"] = target_dates
-    existing["display_rule"] = "毎日0時に日本時間の実行日当日と翌日の2日分へ更新"
-
-    events: list[dict[str, Any]] = []
+    all_events: list[dict[str, Any]] = []
     errors: list[str] = []
 
     for url in SOURCE_URLS:
         try:
-            html = fetch(url)
-            events.extend(parse_page(url, html, target_set))
+            all_events.extend(parse_url(url, date_set))
         except Exception as exc:
-            errors.append(f"{url}: {exc}")
+            errors.append(f"{url}: {type(exc).__name__}: {exc}")
 
-    events = dedupe(events)
-
-    if events:
-        existing["events"] = events
-        existing["last_update_note"] = f"{target_dates[0]} と {target_dates[1]} の予定を更新しました。"
-    else:
-        # ここが重要:
-        # 0件取得でも target_dates は更新するが、events は空で上書きしない
-        existing["last_update_note"] = (
-            f"{target_dates[0]} と {target_dates[1]} の予定取得が0件だったため、"
-            "既存の events は維持しました。target_dates は更新済みです。"
-        )
-
-    existing["last_update_errors"] = errors[:30]
-    save_payload(existing)
-
-    print(existing["last_update_note"])
+    events = dedupe(all_events)
+    write_schedule(events, target, errors)
+    print(f"target_dates={target}, events={len(events)}, errors={len(errors)}")
 
 
 if __name__ == "__main__":

@@ -33,5 +33,5 @@ jobs:
           git config user.name "schedule-bot"
           git config user.email "schedule-bot@example.com"
           git add data/schedule.json
-          git diff --cached --quiet || git commit -m "Update registered Spocale schedule"
+          git diff --cached --quiet || git commit -m "Update filtered Spocale schedule"
           git push

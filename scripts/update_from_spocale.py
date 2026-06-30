@@ -1,12 +1,13 @@
 #!/usr/bin/env python3
 """
-スポカレ 今日＋明日 自動更新・登録対象フィルター版
+スポカレ 今日＋明日 自動更新・日付判定修正版
 
-方針:
-- ページ上の /game/ リンクを日付ごとに拾う
-- team_and_players ページでは、登録チーム/選手に関係する試合だけ残す
-- sports / leagues ページでは、そのURL自体が登録対象なので大会予定として残す
-- 各 game 詳細ページから TV放送情報 / 配信情報 を読む
+今回の主修正:
+- 親要素の長いテキストに含まれる日付を拾ってしまい、上部 SEARCH で停止して0件になる問題を修正
+- 日付は「2026.06.30[火]」のように、その行が日付だけのときだけ採用
+- team_and_playersページは登録チーム・選手名に関係する試合だけ残す
+- leagues / sportsページは登録URLの大会予定として残す
+- 各game詳細ページからTV放送情報・配信情報を読む
 """
 
 from __future__ import annotations
@@ -21,7 +22,6 @@ from urllib.parse import urljoin
 
 import requests
 from bs4 import BeautifulSoup
-from bs4.element import NavigableString, Tag
 
 JST = timezone(timedelta(hours=9))
 BASE = "https://spocale.com"
@@ -93,11 +93,10 @@ SPORT_BY_ID = {
     "52": "スポーツクライミング",
 }
 
-# URLごとの強めの別名。ここに入っている文字を試合行に含むものだけ残す。
 TEAM_ALIASES = {
     "https://spocale.com/sports/14/team_and_players/871": ["ヴィクトリーナ", "姫路"],
     "https://spocale.com/sports/2/team_and_players/1315": ["INAC", "神戸レオネッサ", "INAC神戸"],
-    "https://spocale.com/sports/3/team_and_players/258": ["コベルコ", "スティーラーズ", "神戸S", "神戸"],
+    "https://spocale.com/sports/3/team_and_players/258": ["コベルコ", "スティーラーズ"],
     "https://spocale.com/sports/2/team_and_players/53": ["ツエーゲン", "金沢"],
     "https://spocale.com/sports/2/team_and_players/2596": ["ASハリマ", "ハリマ"],
     "https://spocale.com/sports/1/team_and_players/92": ["カブス"],
@@ -150,7 +149,7 @@ def fetch(url: str) -> str:
                 url,
                 timeout=25,
                 headers={
-                    "User-Agent": "Mozilla/5.0 (compatible; spocale-schedule/5.0)",
+                    "User-Agent": "Mozilla/5.0 (compatible; spocale-schedule/6.0)",
                     "Accept-Language": "ja,en-US;q=0.9,en;q=0.8",
                     "Cache-Control": "no-cache",
                 },
@@ -182,8 +181,9 @@ def page_name(soup: BeautifulSoup) -> str:
     return "記載なし"
 
 
-def iso_date(text: str) -> str | None:
-    m = re.search(r"(20\d{2})\.(\d{2})\.(\d{2})", text)
+def exact_iso_date(text: str) -> str | None:
+    # 重要: 親要素の長文に含まれる日付は使わない。日付だけの行のみ採用。
+    m = re.fullmatch(r"(20\d{2})\.(\d{2})\.(\d{2})\[[^\]]+\]", clean(text))
     if m:
         return f"{m.group(1)}-{m.group(2)}-{m.group(3)}"
     return None
@@ -200,35 +200,32 @@ def normalize_time(text: str) -> str:
     return t
 
 
-def should_stop_listing(text: str) -> bool:
-    if text in {"SEARCH", "MENU", "SCROLL TO TOP"}:
-        return True
-    if text.startswith("#### SEARCH") or text.startswith("#### MENU"):
-        return True
-    if text == "過去の試合日程":
-        return True
-    return False
-
-
-def game_items_by_dom(soup: BeautifulSoup, dates: set[str]) -> list[dict[str, str]]:
-    """
-    DOM順で直前の日付を /game/ リンクに付ける。
-    ただし SEARCH / MENU 以降は停止。
-    """
+def game_items_by_dom(soup: BeautifulSoup, dates: set[str]) -> tuple[list[dict[str, str]], dict[str, int]]:
     current_date: str | None = None
+    saw_schedule_date = False
     items: list[dict[str, str]] = []
+
+    stats = {
+        "all_game_links": 0,
+        "dated_game_links": 0,
+        "target_date_game_links": 0,
+    }
 
     for node in soup.find_all(["h1", "h2", "h3", "h4", "div", "p", "li", "span", "a"]):
         text = clean(node.get_text(" ", strip=True))
         if not text:
             continue
 
-        if should_stop_listing(text) and current_date is not None:
+        if saw_schedule_date and text in {"SEARCH", "MENU", "SCROLL TO TOP"}:
+            break
+        if saw_schedule_date and text == "過去の試合日程":
             break
 
-        d = iso_date(text)
+        d = exact_iso_date(text)
         if d:
             current_date = d
+            saw_schedule_date = True
+            continue
 
         if node.name != "a":
             continue
@@ -237,34 +234,38 @@ def game_items_by_dom(soup: BeautifulSoup, dates: set[str]) -> list[dict[str, st
         if "/game/" not in href:
             continue
 
+        stats["all_game_links"] += 1
+
+        if not re.search(r"(\d{1,2}:\d{2}|未定|終日)", text):
+            continue
+
+        if current_date:
+            stats["dated_game_links"] += 1
+
         if not current_date or current_date not in dates:
             continue
 
-        entry = text
-        if not re.search(r"(\d{1,2}:\d{2}|未定|終日)", entry):
-            continue
+        stats["target_date_game_links"] += 1
 
         items.append({
             "date": current_date,
-            "entry": entry,
+            "entry": text,
             "game_url": urljoin(BASE, href),
         })
 
-    return items
+    return items, stats
 
 
 def aliases_for_url(url: str, title: str) -> list[str]:
     aliases = TEAM_ALIASES.get(url, []).copy()
-
-    # タイトル由来の保険
     t = title
-    for word in ["の日程一覧", "日程一覧", "代表", "男子", "女子", "U-18"]:
+    for word in ["の日程一覧", "日程一覧", "代表", "男子", "女子", "U-18", "(SAMURAI BLUE)"]:
         t = t.replace(word, "")
     t = clean(t)
-    if t and t not in aliases and len(t) >= 2:
+    if t and len(t) >= 2:
         aliases.append(t)
-
-    return [a for a in aliases if a]
+    # 短すぎる「神戸」は誤爆しやすいが、指定URLでは許容。重複だけ削除。
+    return list(dict.fromkeys([a for a in aliases if a]))
 
 
 def keep_for_registered_url(source_url: str, title: str, entry: str) -> bool:
@@ -278,25 +279,23 @@ def keep_for_registered_url(source_url: str, title: str, entry: str) -> bool:
     return any(alias in entry for alias in aliases)
 
 
-def parse_title(title: str, source_url: str) -> tuple[str, str]:
-    title = clean(title).replace(" | スポカレ", "")
-    title = re.sub(r"\s*日時・.*?情報\s*", " ", title)
-    title = clean(title)
+def split_extra_and_venue(right: str) -> tuple[str, str]:
+    right = clean(right)
+    if not right:
+        return "", "記載なし"
 
-    if " vs " not in title:
-        return title or "記載なし", "大会のみ"
+    parts = right.split(" ")
+    if len(parts) >= 2 and parts[-1] == parts[-2]:
+        venue = parts[-1]
+        extra = clean(" ".join(parts[:-2]))
+        return extra, venue
 
-    before, after = title.split(" vs ", 1)
-    parts = before.split(" ")
-    if len(parts) >= 2:
-        event = " ".join(parts[:-1])
-        home = parts[-1]
-        target = f"{home} vs {after}"
-    else:
-        event = "記載なし"
-        target = title
+    if len(parts) >= 2 and len(parts) % 2 == 0:
+        half = len(parts) // 2
+        if parts[:half] == parts[half:]:
+            return "", " ".join(parts[:half])
 
-    return clean(event), clean(target)
+    return "", right
 
 
 def parse_entry(entry: str, source_url: str, page_title: str) -> dict[str, str]:
@@ -314,23 +313,28 @@ def parse_entry(entry: str, source_url: str, page_title: str) -> dict[str, str]:
     left, right = (text.split("|", 1) + [""])[:2] if "|" in text else (text, "")
 
     if is_team_page(source_url):
-        event, target = parse_title(left, source_url)
         kind = "試合"
+        event = "記載なし"
+        target = clean(left)
+
+        if " vs " in left:
+            before, after = left.split(" vs ", 1)
+            after_parts = after.split(" ")
+            if len(after_parts) >= 2:
+                opponent = after_parts[0]
+                event = clean(" ".join(after_parts[1:]))
+                target = clean(f"{before} vs {opponent}")
+            else:
+                target = clean(left)
+
+        extra, venue = split_extra_and_venue(right)
+        if extra:
+            event = clean(f"{event} {extra}") if event != "記載なし" else extra
     else:
+        kind = "大会"
         event = clean(left) or page_title
         target = "大会のみ"
-        kind = "大会"
-
-    venue = "記載なし"
-    if right:
-        d = clean(right)
-        for token in [event, target, page_title]:
-            if token and token != "記載なし":
-                d = clean(d.replace(token, " "))
-        parts = d.split(" ")
-        if len(parts) >= 2 and len(parts) % 2 == 0 and parts[: len(parts)//2] == parts[len(parts)//2 :]:
-            d = " ".join(parts[: len(parts)//2])
-        venue = d or "記載なし"
+        _, venue = split_extra_and_venue(right)
 
     return {
         "time": time_value,
@@ -338,7 +342,7 @@ def parse_entry(entry: str, source_url: str, page_title: str) -> dict[str, str]:
         "sport": sport,
         "event": event or "記載なし",
         "target": target or "記載なし",
-        "venue": venue,
+        "venue": venue or "記載なし",
     }
 
 
@@ -388,12 +392,12 @@ def media_from_detail(game_url: str) -> tuple[str, str]:
         return "記載なし", "記載なし"
 
 
-def parse_source(source_url: str, dates: set[str]) -> tuple[list[dict[str, Any]], list[str]]:
+def parse_source(source_url: str, dates: set[str]) -> tuple[list[dict[str, Any]], list[str], dict[str, int]]:
     html = fetch(source_url)
     soup = BeautifulSoup(html, "html.parser")
     title = page_name(soup)
 
-    raw_items = game_items_by_dom(soup, dates)
+    raw_items, stats = game_items_by_dom(soup, dates)
     events: list[dict[str, Any]] = []
     errors: list[str] = []
 
@@ -418,7 +422,8 @@ def parse_source(source_url: str, dates: set[str]) -> tuple[list[dict[str, Any]]
             "game_url": item["game_url"],
         })
 
-    return events, errors
+    stats["kept_events"] = len(events)
+    return events, errors, stats
 
 
 def tkey(t: str) -> int:
@@ -446,7 +451,7 @@ def dedupe(events: list[dict[str, Any]]) -> list[dict[str, Any]]:
     return sorted(out.values(), key=lambda e: (e["date"], tkey(e["time"]), e["sport"], e["target"]))
 
 
-def write_payload(events: list[dict[str, Any]], target: list[str], errors: list[str]) -> None:
+def write_payload(events: list[dict[str, Any]], target: list[str], errors: list[str], debug: dict[str, Any]) -> None:
     payload = {
         "generated_at": now_jst().isoformat(timespec="seconds"),
         "timezone": "Asia/Tokyo",
@@ -457,6 +462,7 @@ def write_payload(events: list[dict[str, Any]], target: list[str], errors: list[
         "events": events,
         "last_update_note": f"{target[0]} と {target[1]} の登録対象予定を {len(events)} 件取得しました。",
         "last_update_errors": errors[:100],
+        "debug_summary": debug,
     }
     OUT.parent.mkdir(parents=True, exist_ok=True)
     OUT.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
@@ -467,17 +473,20 @@ def main() -> None:
     dates = set(target)
     all_events: list[dict[str, Any]] = []
     errors: list[str] = []
+    debug: dict[str, Any] = {}
 
     for source_url in SOURCE_URLS:
         try:
-            ev, er = parse_source(source_url, dates)
+            ev, er, stats = parse_source(source_url, dates)
             all_events.extend(ev)
             errors.extend(er)
+            if stats.get("target_date_game_links") or stats.get("kept_events"):
+                debug[source_url] = stats
         except Exception as exc:
             errors.append(f"{source_url}: {type(exc).__name__}: {exc}")
 
     events = dedupe(all_events)
-    write_payload(events, target, errors)
+    write_payload(events, target, errors, debug)
     print(f"updated target_dates={target}, events={len(events)}, errors={len(errors)}")
 
 

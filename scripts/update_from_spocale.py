@@ -1,13 +1,13 @@
 #!/usr/bin/env python3
 """
-スポカレ 今日＋明日 自動更新・日付判定修正版
+スポカレ 今日＋明日 自動更新・行テキスト解析版
 
-今回の主修正:
-- 親要素の長いテキストに含まれる日付を拾ってしまい、上部 SEARCH で停止して0件になる問題を修正
-- 日付は「2026.06.30[火]」のように、その行が日付だけのときだけ採用
-- team_and_playersページは登録チーム・選手名に関係する試合だけ残す
-- leagues / sportsページは登録URLの大会予定として残す
-- 各game詳細ページからTV放送情報・配信情報を読む
+今回の修正:
+- DOM構造ではなく、soup.get_text("\n") の行テキストを基準に日付と予定行を読む
+- /game/リンクはページ内のリンク一覧から、予定行テキストと照合して紐付ける
+- team_and_playersページは登録対象チーム・選手名に関係する試合だけ残す
+- sports / leaguesページは登録URLの大会予定として残す
+- 詳細ページからTV放送情報・配信情報を読む
 """
 
 from __future__ import annotations
@@ -141,6 +141,10 @@ def clean(s: str | None) -> str:
     return re.sub(r"\s+", " ", s or "").strip()
 
 
+def compact(s: str | None) -> str:
+    return re.sub(r"\s+", "", s or "")
+
+
 def fetch(url: str) -> str:
     last = None
     for i in range(3):
@@ -149,7 +153,7 @@ def fetch(url: str) -> str:
                 url,
                 timeout=25,
                 headers={
-                    "User-Agent": "Mozilla/5.0 (compatible; spocale-schedule/6.0)",
+                    "User-Agent": "Mozilla/5.0 (compatible; spocale-schedule/7.0)",
                     "Accept-Language": "ja,en-US;q=0.9,en;q=0.8",
                     "Cache-Control": "no-cache",
                 },
@@ -181,9 +185,12 @@ def page_name(soup: BeautifulSoup) -> str:
     return "記載なし"
 
 
-def exact_iso_date(text: str) -> str | None:
-    # 重要: 親要素の長文に含まれる日付は使わない。日付だけの行のみ採用。
-    m = re.fullmatch(r"(20\d{2})\.(\d{2})\.(\d{2})\[[^\]]+\]", clean(text))
+def lines_from_soup(soup: BeautifulSoup) -> list[str]:
+    return [clean(x) for x in soup.get_text("\n", strip=True).splitlines() if clean(x)]
+
+
+def exact_iso_date(line: str) -> str | None:
+    m = re.fullmatch(r"(20\d{2})\.(\d{2})\.(\d{2})\[[^\]]+\]", clean(line))
     if m:
         return f"{m.group(1)}-{m.group(2)}-{m.group(3)}"
     return None
@@ -200,57 +207,92 @@ def normalize_time(text: str) -> str:
     return t
 
 
-def game_items_by_dom(soup: BeautifulSoup, dates: set[str]) -> tuple[list[dict[str, str]], dict[str, int]]:
+def game_link_candidates(soup: BeautifulSoup) -> list[dict[str, str]]:
+    out: list[dict[str, str]] = []
+    for a in soup.find_all("a"):
+        href = a.get("href") or ""
+        if "/game/" not in href:
+            continue
+        text = clean(a.get_text(" ", strip=True))
+        if not text:
+            continue
+        out.append({
+            "text": text,
+            "compact": compact(text),
+            "url": urljoin(BASE, href),
+        })
+    return out
+
+
+def find_game_url_for_line(line: str, candidates: list[dict[str, str]], start_index: int) -> tuple[str, int]:
+    line_c = compact(line)
+
+    # まず順番を保って近くから完全一致または包含一致
+    for i in range(start_index, len(candidates)):
+        c = candidates[i]["compact"]
+        if c == line_c or c in line_c or line_c in c:
+            return candidates[i]["url"], i + 1
+
+    # 保険として先頭からも見る
+    for i, cand in enumerate(candidates):
+        c = cand["compact"]
+        if c == line_c or c in line_c or line_c in c:
+            return cand["url"], i + 1
+
+    return "", start_index
+
+
+def line_game_items(soup: BeautifulSoup, dates: set[str]) -> tuple[list[dict[str, str]], dict[str, int]]:
+    lines = lines_from_soup(soup)
+    candidates = game_link_candidates(soup)
+
     current_date: str | None = None
-    saw_schedule_date = False
+    saw_schedule = False
+    link_index = 0
     items: list[dict[str, str]] = []
 
     stats = {
-        "all_game_links": 0,
-        "dated_game_links": 0,
-        "target_date_game_links": 0,
+        "lines": len(lines),
+        "game_links": len(candidates),
+        "date_lines": 0,
+        "target_date_lines": 0,
+        "game_like_lines": 0,
+        "matched_game_urls": 0,
     }
 
-    for node in soup.find_all(["h1", "h2", "h3", "h4", "div", "p", "li", "span", "a"]):
-        text = clean(node.get_text(" ", strip=True))
-        if not text:
-            continue
-
-        if saw_schedule_date and text in {"SEARCH", "MENU", "SCROLL TO TOP"}:
-            break
-        if saw_schedule_date and text == "過去の試合日程":
-            break
-
-        d = exact_iso_date(text)
+    for line in lines:
+        d = exact_iso_date(line)
         if d:
             current_date = d
-            saw_schedule_date = True
+            saw_schedule = True
+            stats["date_lines"] += 1
+            if d in dates:
+                stats["target_date_lines"] += 1
             continue
 
-        if node.name != "a":
-            continue
-
-        href = node.get("href") or ""
-        if "/game/" not in href:
-            continue
-
-        stats["all_game_links"] += 1
-
-        if not re.search(r"(\d{1,2}:\d{2}|未定|終日)", text):
-            continue
-
-        if current_date:
-            stats["dated_game_links"] += 1
+        if saw_schedule and line in {"#### SEARCH", "### SEARCH", "SEARCH", "#### MENU", "### MENU", "MENU", "SCROLL TO TOP"}:
+            break
 
         if not current_date or current_date not in dates:
             continue
 
-        stats["target_date_game_links"] += 1
+        if not re.search(r"(\d{1,2}:\d{2}|未定|終日)", line):
+            continue
+
+        # 予定行として最低限、競技名またはVSまたは大会らしい語があるものだけ
+        if not (" VS " in line or " vs " in line or any(s in line for s in SPORT_BY_ID.values()) or "オープン" in line or "大会" in line or "ワールドツアー" in line):
+            continue
+
+        stats["game_like_lines"] += 1
+        game_url, link_index = find_game_url_for_line(line, candidates, link_index)
+
+        if game_url:
+            stats["matched_game_urls"] += 1
 
         items.append({
             "date": current_date,
-            "entry": text,
-            "game_url": urljoin(BASE, href),
+            "entry": line,
+            "game_url": game_url,
         })
 
     return items, stats
@@ -264,7 +306,6 @@ def aliases_for_url(url: str, title: str) -> list[str]:
     t = clean(t)
     if t and len(t) >= 2:
         aliases.append(t)
-    # 短すぎる「神戸」は誤爆しやすいが、指定URLでは許容。重複だけ削除。
     return list(dict.fromkeys([a for a in aliases if a]))
 
 
@@ -286,9 +327,7 @@ def split_extra_and_venue(right: str) -> tuple[str, str]:
 
     parts = right.split(" ")
     if len(parts) >= 2 and parts[-1] == parts[-2]:
-        venue = parts[-1]
-        extra = clean(" ".join(parts[:-2]))
-        return extra, venue
+        return clean(" ".join(parts[:-2])), parts[-1]
 
     if len(parts) >= 2 and len(parts) % 2 == 0:
         half = len(parts) // 2
@@ -347,9 +386,11 @@ def parse_entry(entry: str, source_url: str, page_title: str) -> dict[str, str]:
 
 
 def detail_text_lines(game_url: str) -> list[str]:
+    if not game_url:
+        return []
     html = fetch(game_url)
     soup = BeautifulSoup(html, "html.parser")
-    return [clean(x) for x in soup.get_text("\n", strip=True).splitlines() if clean(x)]
+    return lines_from_soup(soup)
 
 
 def provider_section(lines: list[str], start: str, stops: list[str]) -> str:
@@ -397,7 +438,7 @@ def parse_source(source_url: str, dates: set[str]) -> tuple[list[dict[str, Any]]
     soup = BeautifulSoup(html, "html.parser")
     title = page_name(soup)
 
-    raw_items, stats = game_items_by_dom(soup, dates)
+    raw_items, stats = line_game_items(soup, dates)
     events: list[dict[str, Any]] = []
     errors: list[str] = []
 
@@ -480,7 +521,7 @@ def main() -> None:
             ev, er, stats = parse_source(source_url, dates)
             all_events.extend(ev)
             errors.extend(er)
-            if stats.get("target_date_game_links") or stats.get("kept_events"):
+            if stats.get("target_date_lines") or stats.get("game_like_lines") or stats.get("kept_events"):
                 debug[source_url] = stats
         except Exception as exc:
             errors.append(f"{source_url}: {type(exc).__name__}: {exc}")

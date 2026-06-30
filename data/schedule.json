@@ -1,5 +1,5 @@
 {
-  "generated_at": "2026-06-30T15:39:36+09:00",
+  "generated_at": "2026-06-30T15:55:18+09:00",
   "timezone": "Asia/Tokyo",
   "source_name": "スポカレ",
   "source_urls": [
@@ -52,5 +52,6 @@
   ],
   "events": [],
   "last_update_note": "2026-06-30 と 2026-07-01 の登録対象予定を 0 件取得しました。",
-  "last_update_errors": []
+  "last_update_errors": [],
+  "debug_summary": {}
 }

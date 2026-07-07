@@ -1,5 +1,5 @@
 {
-  "generated_at": "2026-07-07T06:13:43+09:00",
+  "generated_at": "2026-07-08T06:09:19+09:00",
   "timezone": "Asia/Tokyo",
   "source_name": "スポカレ",
   "source_urls": [
@@ -47,11 +47,11 @@
   ],
   "display_rule": "毎日0時に日本時間の実行日当日と翌日の2日分へ更新",
   "target_dates": [
-    "2026-07-07",
-    "2026-07-08"
+    "2026-07-08",
+    "2026-07-09"
   ],
   "events": [],
-  "last_update_note": "2026-07-07 と 2026-07-08 の登録対象予定を 0 件取得しました。",
+  "last_update_note": "2026-07-08 と 2026-07-09 の登録対象予定を 0 件取得しました。",
   "last_update_errors": [],
   "debug_summary": {}
 }
